@@ -13,7 +13,14 @@ Usage:  python3 build.py [--no-fetch]
                      have recorded the Zotero pull under cache/zotero/.
 """
 
-import argparse, json, os, re, subprocess, time, urllib.parse, urllib.request
+import argparse
+import json
+import os
+import re
+import subprocess
+import time
+import urllib.parse
+import urllib.request
 from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -27,12 +34,12 @@ CURL_CONF = os.path.expanduser("~/.config/zotero-api.conf")
 # Leaving it unset is supported - the address is simply omitted and the calls fall
 # back to the common pool - so no personal address is baked into this file.
 MAILTO = os.environ.get("ZOTERO_MAP_MAILTO", "").strip()
-USER_AGENT = "zotero-map (%s)" % MAILTO if MAILTO else "zotero-map"
+USER_AGENT = f"zotero-map ({MAILTO})" if MAILTO else "zotero-map"
 
 
 # ---------------------------------------------------------------- Zotero
 
-def _curl(args, what, show_stderr=True):
+def _curl(args: list, what: str, show_stderr: bool = True):
     """Run curl and return the parsed body, or fail with a message that names the cause.
 
     Without the exit-status check a missing or unreadable curl config surfaces as
@@ -42,26 +49,27 @@ def _curl(args, what, show_stderr=True):
     r = subprocess.run(["curl", "-s"] + args, capture_output=True, text=True)
     if r.returncode != 0 or not r.stdout.strip():
         tail = r.stderr.strip()[:200]
-        detail = " - %s" % tail if show_stderr and tail else ""
-        raise SystemExit("curl failed fetching %s (exit %d). Check that %s exists, is "
-                         "readable, and carries a Zotero-API-Key header.%s"
-                         % (what, r.returncode, CURL_CONF, detail))
+        detail = f" - {tail}" if show_stderr and tail else ""
+        raise SystemExit(f"curl failed fetching {what} (exit {r.returncode}). Check that "
+                         f"{CURL_CONF} exists, is readable, and carries a "
+                         f"Zotero-API-Key header.{detail}")
     try:
         return json.loads(r.stdout)
     except json.JSONDecodeError:
         # deliberately does not echo the body - see Fetcher.connect below
-        raise SystemExit("Zotero returned a non-JSON body for %s, which usually means the "
-                         "key in %s was rejected." % (what, CURL_CONF))
+        raise SystemExit(f"Zotero returned a non-JSON body for {what}, which usually "
+                         f"means the key in {CURL_CONF} was rejected.")
 
 
 # ---------------------------------------------------------------- external APIs
 
-def _get_json(url, timeout=40):
+def _get_json(url: str, timeout: int = 40):
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    return json.load(urllib.request.urlopen(req, timeout=timeout))
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        return json.load(response)
 
 
-def _cache_read(path, what):
+def _cache_read(path: str, what: str):
     """A cached response, or None when there is nothing usable on disk.
 
     A killed build can leave a half-written file behind, and a cold build is slow
@@ -77,12 +85,19 @@ def _cache_read(path, what):
         with open(path, encoding="utf-8") as fh:
             return json.load(fh)
     except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
-        print("WARNING: unreadable cache entry for %s (%s) - refetching: %s"
-              % (what, os.path.basename(path), e))
+        print(f"WARNING: unreadable cache entry for {what} "
+              f"({os.path.basename(path)}) - refetching: {e}")
         return None
 
 
-def _cache_write(path, obj):
+def _need_recorded(cache: str) -> SystemExit:
+    """The error for --no-fetch when nothing has been recorded yet."""
+    return SystemExit(
+        f"--no-fetch has nothing recorded at {cache}. Run once without --no-fetch "
+        "to record the library, then --no-fetch works offline.")
+
+
+def _cache_write(path: str, obj) -> None:
     """Write through a temp file, so an interrupted run cannot leave a partial entry.
 
     The .tmp name cannot collide with a lookup: every cache path is a sanitised
@@ -131,10 +146,7 @@ class Fetcher:
         if no_fetch:
             hit = _cache_read(cache, "the Zotero user id")
             if hit is None:
-                raise SystemExit(
-                    "--no-fetch has nothing recorded at %s. Run once without "
-                    "--no-fetch to record the library, then --no-fetch works offline."
-                    % cache)
+                raise _need_recorded(cache)
             return cls(hit, no_fetch)
         user_id = _curl(["-m", "30", "--config", CURL_CONF,
                          "https://api.zotero.org/keys/current"],
@@ -143,7 +155,7 @@ class Fetcher:
         return cls(user_id, no_fetch)
 
     def zotero(self, path, **params):
-        url = "https://api.zotero.org/users/%s/%s" % (self.user_id, path)
+        url = f"https://api.zotero.org/users/{self.user_id}/{path}"
         if params:
             url += "?" + urllib.parse.urlencode(params)
         return _curl(["-m", "60", "--config", CURL_CONF, url], path)
@@ -169,10 +181,7 @@ class Fetcher:
         if self.no_fetch:
             hit = _cache_read(cache, "the recorded Zotero " + path)
             if hit is None:
-                raise SystemExit(
-                    "--no-fetch has nothing recorded at %s. Run once without "
-                    "--no-fetch to record the library, then --no-fetch works offline."
-                    % cache)
+                raise _need_recorded(cache)
             return hit
         rows, start = [], 0
         limit = params.pop("limit", 100)
@@ -206,7 +215,7 @@ class Fetcher:
             return hit
         if self.no_fetch:
             return {"error": "not cached, --no-fetch"}
-        url = "https://api.openalex.org/works/doi:%s" % urllib.parse.quote(doi, safe="")
+        url = "https://api.openalex.org/works/doi:" + urllib.parse.quote(doi, safe="")
         if MAILTO:
             url += "?mailto=" + urllib.parse.quote(MAILTO, safe="")
         try:
@@ -247,8 +256,9 @@ class Fetcher:
             return {"error": "not cached, --no-fetch"}
         m = re.match(r"10\.48550/arxiv\.(.+)", doi, re.I)
         ident = "ARXIV:" + m.group(1) if m else "DOI:" + doi
-        url = ("https://api.semanticscholar.org/graph/v1/paper/%s"
-               "?fields=title,year,externalIds,references.externalIds" % urllib.parse.quote(ident, safe=":"))
+        url = ("https://api.semanticscholar.org/graph/v1/paper/"
+               + urllib.parse.quote(ident, safe=":")
+               + "?fields=title,year,externalIds,references.externalIds")
         try:
             d = _get_json(url)
             if "error" in d or "message" in d:
@@ -265,7 +275,7 @@ class Fetcher:
 
 # ---------------------------------------------------------------- pipeline
 
-def norm_doi(d):
+def norm_doi(d) -> str:
     return (d or "").strip().lower().replace("https://doi.org/", "")
 
 
@@ -296,7 +306,7 @@ def pull(fetch):
              if i["data"]["itemType"] not in ("note", "attachment")
              and not i["data"].get("deleted")]
     colls = {c["data"]["key"]: c["data"]["name"] for c in fetch.zotero_all("collections", limit=50)}
-    print("pulled %d items, %d collections" % (len(items), len(colls)))
+    print(f"pulled {len(items)} items, {len(colls)} collections")
     return items, colls
 
 
@@ -387,14 +397,14 @@ def report_fetch(fetch, refs, fallbacks, missing):
     Its own step, between fetching and edge building, so these lines keep their
     position in the transcript.
     """
-    print("reference lists: %d from OpenAlex, %d recovered via Semantic Scholar, "
-          "%d FAILED, %d with none available"
-          % (sum(1 for v in refs.values() if v), fallbacks,
-             len(fetch.s2_failures) + len(fetch.oa_failures), len(missing)))
+    failed = len(fetch.s2_failures) + len(fetch.oa_failures)
+    print(f"reference lists: {sum(1 for v in refs.values() if v)} from OpenAlex, "
+          f"{fallbacks} recovered via Semantic Scholar, {failed} FAILED, "
+          f"{len(missing)} with none available")
     for doi, err in fetch.oa_failures:
-        print("   OPENALEX FAILED  %-31s %s" % (doi, err))
+        print(f"   OPENALEX FAILED  {doi:<31} {err}")
     for doi, err in fetch.s2_failures:
-        print("   FETCH FAILED  %-34s %s" % (doi, err))
+        print(f"   FETCH FAILED  {doi:<34} {err}")
     if fetch.s2_failures or fetch.oa_failures:
         print("   ^ these carry no outbound edges in this build. The failure is not "
               "cached, so re-running retries them.")
@@ -443,16 +453,17 @@ def build_edges(nodes, refs, doi_refs, arxiv_refs, AL):
                  if nodes[e["source"]]["year"] and nodes[e["target"]]["year"]
                  and nodes[e["source"]]["year"] < nodes[e["target"]]["year"]]
     if backwards:
-        print("WARNING: %d citation(s) point forward in time - check these dates:" % len(backwards))
+        print(f"WARNING: {len(backwards)} citation(s) point forward in time - "
+              "check these dates:")
         for e in backwards:
             s, d = nodes[e["source"]], nodes[e["target"]]
-            print("   %s %s -> %s %s  (cited work dated later than the citing one)"
-                  % ((s["creators"] or ["?"])[0], s["year"], (d["creators"] or ["?"])[0], d["year"]))
+            print(f'   {(s["creators"] or ["?"])[0]} {s["year"]} -> '
+                  f'{(d["creators"] or ["?"])[0]} {d["year"]}  '
+                  "(cited work dated later than the citing one)")
 
-    print("edges: %d (%d openalex, %d s2, %d manual)" % (
-        len(edges), sum(1 for e in edges if e["via"] == "openalex"),
-        sum(1 for e in edges if e["via"] == "semanticscholar"),
-        sum(1 for e in edges if e["via"] == "manual")))
+    via = Counter(e["via"] for e in edges)
+    print(f'edges: {len(edges)} ({via["openalex"]} openalex, '
+          f'{via["semanticscholar"]} s2, {via["manual"]} manual)')
     return edges, indeg, outdeg
 
 
@@ -488,7 +499,7 @@ def classify(nodes, indeg, outdeg):
         else:
             n["role"], n["role_source"] = "satellite", "computed"
     return {"foundational_in_degree": thresh,
-            "basis": "max(3, %dth percentile of non-zero in-degree)" % round(PCTILE * 100)}
+            "basis": f"max(3, {round(PCTILE * 100)}th percentile of non-zero in-degree)"}
 
 
 def tag_affinity(nodes, edges):
@@ -521,8 +532,8 @@ def tag_affinity(nodes, edges):
                 tag_edges.append({"a": a, "b": b, "j": round(j, 3), "shared": sorted(inter)})
     for k in nodes:
         nodes[k]["tag_degree"] = sum(1 for e in tag_edges if k in (e["a"], e["b"]))
-    print("vocabulary edges: %d at Jaccard >= %.2f (%d items carry affinity facets)"
-          % (len(tag_edges), TAG_MIN, sum(1 for n in nodes.values() if _lt(n))))
+    print(f"vocabulary edges: {len(tag_edges)} at Jaccard >= {TAG_MIN:.2f} "
+          f"({sum(1 for n in nodes.values() if _lt(n))} items carry affinity facets)")
     return tag_edges, TAG_MIN
 
 
@@ -541,8 +552,10 @@ def emit(nodes, edges, tag_edges, threshold, tag_min):
         "edges": sorted(edges, key=lambda e: (e["source"], e["target"])),
     }
     p = os.path.join(OUT, "graph.json")
-    json.dump(graph, open(p, "w"), indent=1, sort_keys=True)
-    print("wrote %s  |  foundational threshold: in-degree >= %d" % (p, threshold["foundational_in_degree"]))
+    with open(p, "w", encoding="utf-8") as fh:
+        json.dump(graph, fh, indent=1, sort_keys=True)
+    print(f'wrote {p}  |  foundational threshold: '
+          f'in-degree >= {threshold["foundational_in_degree"]}')
     print("roles:", dict(Counter(n["role"] for n in nodes.values())))
 
 
@@ -564,7 +577,8 @@ def main():
 
     fetch = Fetcher.connect(args.no_fetch)
 
-    AL = json.load(open(os.path.join(HERE, "aliases.json")))
+    with open(os.path.join(HERE, "aliases.json"), encoding="utf-8") as fh:
+        AL = json.load(fh)
 
     items, colls = pull(fetch)
     nodes, oa_by_key = resolve_identity(fetch, items, colls, AL)

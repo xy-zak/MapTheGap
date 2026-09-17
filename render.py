@@ -7,7 +7,10 @@ space and the canvas grows to fit them, so a source belonging to two collections
 or an edge crossing between them — needs no change to the layout.
 """
 
-import json, os, math, re
+import json
+import math
+import os
+import re
 
 import force   # the clustering layout lives there; see its module docstring
 
@@ -15,7 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES = os.path.join(HERE, "templates")
 
 
-def _tpl(name):
+def _tpl(name: str) -> str:
     with open(os.path.join(TEMPLATES, name), encoding="utf-8") as fh:
         return fh.read()
 
@@ -43,7 +46,7 @@ def load_template():
 PLACEHOLDER = re.compile(r"__([A-Z]+)__")
 
 
-def fill(template, values):
+def fill(template: str, values: dict) -> str:
     """Substitute every __TOKEN__ in one pass, refusing anything unexpected.
 
     One pass rather than a chain of str.replace: chained replacement rescans the
@@ -57,14 +60,14 @@ def fill(template, values):
     def one(m):
         key = m.group(1)
         if key not in values:
-            raise KeyError("template refers to __%s__, which has no value" % key)
+            raise KeyError(f"template refers to __{key}__, which has no value")
         seen.add(key)
         return values[key]
 
     out = PLACEHOLDER.sub(one, template)
     unused = sorted(set(values) - seen)
     if unused:
-        raise KeyError("values the template never used: %s" % ", ".join(unused))
+        raise KeyError(f"values the template never used: {', '.join(unused)}")
     return out
 
 # ---- time axis -------------------------------------------------------------
@@ -111,7 +114,7 @@ NO_BAND = "(unclassified)"
 # one of those names. Asserted because the failure was otherwise a KeyError from
 # inside a comprehension, nowhere near the two lines that disagreed.
 assert DEFAULT_BAND in [f.rstrip(":") for f in BAND_FIELDS], (
-    "DEFAULT_BAND %r is not one of BAND_FIELDS %r" % (DEFAULT_BAND, BAND_FIELDS))
+    f"DEFAULT_BAND {DEFAULT_BAND!r} is not one of BAND_FIELDS {BAND_FIELDS!r}")
 
 
 def radius(n):
@@ -164,8 +167,8 @@ def build_bands(nodes, field):
                 assign[n["key"]] = [name, len(lanes) - 1]
         secs.append({"name": name, "count": len(members),
                      "lanes": max(1, len(lanes)), "lane_px": LANE_H,
-                     "note": ("no %s tag" % field) if name == NO_BAND
-                             else "%s %s" % (field, name)})
+                     "note": f"no {field} tag" if name == NO_BAND
+                             else f"{field} {name}"})
     return {"sections": secs, "assign": assign}
 
 
@@ -223,13 +226,13 @@ def main():
     p = os.path.join(HERE, "out", "map.html")
     with open(p, "w", encoding="utf-8") as fh:
         fh.write(out)
-    print("wrote %s (%.0f KB) — %d nodes, %d edges, canvas %dx%d" % (
-        p, len(out) / 1024, len(payload["nodes"]), len(payload["edges"]), W, H))
+    print(f'wrote {p} ({len(out) / 1024:.0f} KB) — {len(payload["nodes"])} nodes, '
+          f'{len(payload["edges"])} edges, canvas {W}x{H}')
     for f in bands:
         secs = bands[f]["sections"]
-        print("   band by %-9s %2d rows, %3d lanes  %s"
-              % (f, len(secs), sum(s["lanes"] for s in secs),
-                 " ".join("%s(%d)" % (s["name"][:18], s["count"]) for s in secs)))
+        names = " ".join(f'{s["name"][:18]}({s["count"]})' for s in secs)
+        print(f'   band by {f:<9} {len(secs):>2} rows, '
+              f'{sum(s["lanes"] for s in secs):>3} lanes  {names}')
 
 
 if __name__ == "__main__":

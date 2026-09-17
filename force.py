@@ -169,7 +169,7 @@ def _tpl(name):
         return fh.read()
 
 
-def is_facet(tag):
+def is_facet(tag: str) -> bool:
     """A tag that carries meaning for the layout.
 
     role: is excluded wherever this is used — it is a computed property of the
@@ -179,7 +179,7 @@ def is_facet(tag):
     return ": " in tag and not tag.startswith("role:")
 
 
-def tag_freq(nodes):
+def tag_freq(nodes: dict) -> collections.Counter:
     """How many items carry each facet tag.
 
     Shared by the springs and the cluster labels, which both need it and
@@ -307,7 +307,7 @@ def label_clusters(com, nodes):
             "id": c, "size": len(mem), "members": mem,
             "label": top[0] if top else "unlabelled",
             "also": top[1:],
-            "collections": ", ".join("%s %d" % (k, v) for k, v in cols.most_common()),
+            "collections": ", ".join(f"{k} {v}" for k, v in cols.most_common()),
         }
     return out
 
