@@ -1,13 +1,13 @@
 ---
 name: zotero-library
 description: >
-  Tag, file and tidy a Zotero library through the Zotero Web API, including the
-  prefixed tag vocabulary the citation map reads. Use when asked to tag papers, design
-  or extend a tag vocabulary, file loose items into collections, find or merge
-  duplicates, fix orphaned attachments, flag citations with no PDF, or audit a library.
-  Triggers: Zotero, zotero.sqlite, "my library", "tag these papers", "set up a tag
-  vocabulary", "duplicates in Zotero", "which papers am I missing the PDF for". API
-  mechanics and failure modes live in references/zotero-api.md.
+  File and tidy a Zotero library through the Zotero Web API — collections, duplicates,
+  orphaned attachments and missing files. Use when asked to file loose items into
+  collections, find or merge duplicate records, fix orphaned attachments, flag or fetch
+  citations with no PDF, or audit a library. Triggers: Zotero, zotero.sqlite, "my
+  library", "file these papers", "duplicates in Zotero", "which papers am I missing the
+  PDF for", orphaned attachment. API mechanics and failure modes live in
+  references/zotero-api.md. Applying the tag vocabulary itself is the zotero-tag skill.
 ---
 
 # Organising a Zotero library
@@ -15,10 +15,10 @@ description: >
 A library is someone's research memory. Every write syncs to their account and every
 device, so the standing bias is: **read widely, write narrowly, verify after.**
 
-This skill ships with the MapTheGap repo because the citation map depends on the tag
-vocabulary described below — a library with no prefixed tags still produces a citation
-graph, but every banding facet collapses into one `(unclassified)` band and no
-vocabulary edges form. It is useful on its own too.
+This skill ships with the MapTheGap repo, and covers everything about a library
+*except* its tag vocabulary. **Tagging is the `zotero-tag` skill** — the facets, the
+language, the per-facet cap and the merge procedure all live there. Use this one for
+where items sit and which files they have.
 
 ## Before anything else
 
@@ -56,83 +56,14 @@ curl -s --config ~/.config/zotero-api.conf https://api.zotero.org/keys/current \
 
 If the key does get echoed, say so plainly and suggest rotating it.
 
-## The facets the citation map reads
-
-If the library is being tagged so the map can use it, these prefixes are not a
-suggestion — they are what the code looks for:
-
-| facet | what it answers | used by the map for |
-|---|---|---|
-| `subject:` | what the item is about | a banding facet, and vocabulary edges |
-| `question:` | what problem it addresses | a banding facet, and vocabulary edges |
-| `approach:` | what tradition or technique it uses | a banding facet, and vocabulary edges |
-| any other prefix, e.g. `evidence:` | whatever it answers | **cluster labels only** |
-| `role:` | the map's own output | read back as a judged input; excluded from the layout |
-
-`role:` is written by the map, not by hand, with one exception: `role: contrarian` is a
-human judgement the build deliberately lets win over its own rules. Never apply the
-other `role:` values by hand — they are recomputed every run.
-
-Two properties matter more than the exact terms. **Every tag should span at least two
-items** across the whole library, or it is a note rather than a category. And items
-should carry **more than one** value in a facet only when that is genuinely true: the
-banding puts each source in the band of its *rarest* tag in the facet, so a generously
-tagged item lands somewhere surprising.
-
-## Read the vocabulary before inventing one
-
-A library organised this way usually has a **standalone note in the library root**
-recording its vocabulary. It is the authority.
-
-Finding it takes a small search, because **notes carry no title field in the API**.
-Zotero derives the title from the first line of the body, so you must do the same — see
-references/zotero-api.md for the query.
-
-If no such note exists, say so and offer to create one as part of the work. Read it
-fully before tagging anything: it carries the facets, the definition of each term, the
-conventions and the provenance of past decisions.
-
-Conventions such a note typically encodes, which you must honour rather than re-derive:
-
-- **Prefixed facets**, so the Zotero tag selector groups them. One tag is
-  conventionally unprefixed — a to-do marker like `MISSING` — so it sorts to the top.
-- **Spelling and punctuation** exactly as written, including British vs. American
-  spelling and ampersands vs. "and". The map matches on the literal string.
-- **Add a value rather than stretching one.** If an item does not fit, the facet is
-  probably missing a term.
-- **Some facets travel, most do not.** A facet describing *what kind of claim an item
-  supports* is the same question in any literature and should be shared. Subject facets
-  are per-collection: a vocabulary for governance theory means nothing in a
-  machine-learning collection, and forcing one on both serves neither.
-
-After any change, **update the note** — its counts, and a dated provenance paragraph
-saying what you did and why. A vocabulary note whose numbers have drifted is worse than
-none.
-
 ## Scope
 
 If the person has not named papers or a collection, **ask before acting**. Offer the
 collections by name with item counts. Do not default to the whole library.
 
-When *applying an existing documented vocabulary*, act directly and report. When
-*designing a new vocabulary* for a collection that has none, present the proposed terms
-and the per-item assignment for approval first — the vocabulary is a long-lived
-decision and the person's subject knowledge beats yours.
-
-## Tagging
-
-**Ground every tag in the item's own text.** Fetch abstracts from Crossref, then
-OpenAlex, then Semantic Scholar; coverage is patchy and differs between them. When none
-has one, tag from title and venue and **say which items those were**, both in your
-report and in the note's provenance. Never quietly infer content.
-
-Where the library holds the PDF, read it. `storage/<attachmentKey>/.zotero-ft-cache` is
-the extracted plain text of a stored file, far cheaper than parsing the PDF.
-
-**Replacing tags replaces the whole set.** Import translators leave catalogue and
-subject-code noise — arXiv category codes, bilingual library headings, DataCite `FOS:`
-strings. That noise is what you are clearing, and a PATCH with the new tag list removes
-it in the same operation. Keep the originals in scratch so they are recoverable.
+Filing and tagging usually want doing together: an item moved into a collection should
+carry that collection's vocabulary. Do the move here and hand the tagging to
+`zotero-tag`, which owns the facets and the per-facet cap.
 
 ## MISSING — citations with no file
 
@@ -192,16 +123,15 @@ it. **Do not delete files on your own judgment.**
 
 After writing, re-read from the API and check:
 
-- every count stated in the vocabulary note against the live library
-- no tag with a single holder
-- no unprefixed tag other than the intended marker
 - no untagged item inside a collection
-- no item outside every collection except the note
+- no item outside every collection except the vocabulary note
+- every attachment either parented or reported
 - the trash contains what you expect and nothing else
 
-This step catches real mistakes — stale counts, sections duplicated during a note
-rewrite, an item missed. Run it every time, and report what it found rather than
-asserting success.
+This step catches real mistakes — an item missed, a re-parent that did not take. Run it
+every time, and report what it found rather than asserting success.
 
-When comparing note counts to live tags, remember the note stores HTML: unescape
-`&amp;` before matching, or ampersand tags look like phantom mismatches.
+Vocabulary checks — counts, single-holder values, the per-facet cap — belong to the
+`zotero-tag` skill, which regenerates
+`.claude/skills/zotero-tag/references/vocabulary.md` from the library and verifies
+against that.

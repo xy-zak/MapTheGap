@@ -12,6 +12,7 @@ The output is a single self-contained HTML page with two views of the same data.
 ```
 build.py      pull → resolve identity → fetch references → build edges → classify → out/graph.json
 render.py     out/graph.json → out/map.html   (both view modes, one page)
+vocab.py      the library's live tag vocabulary → the zotero-tag skill's reference
 force.py      the clustering layout — imported by render.py, never run directly
 templates/    the page itself: map.html + map.css + map.js, and cluster.css,
               cluster.js, cluster.export.css for the clustering layer. Real CSS
@@ -79,13 +80,25 @@ without installing anything:
 | skill | covers |
 |---|---|
 | `zotero-map` | this tooling — the routine, the classification rules, the layout decisions and what to verify before believing a build |
-| `zotero-library` | the prefixed tag vocabulary the map reads, plus filing, duplicates and Zotero Web API mechanics |
+| `zotero-tag` | the prefixed tag vocabulary the map reads — the four facets, the language, a cap of 15 values per facet, and how to merge tags that have grown semantically close |
+| `zotero-library` | filing, duplicates, orphaned attachments, missing files, and Zotero Web API mechanics |
 
 The map reads `subject:`, `question:` and `approach:` tags for its three banding facets
 and its vocabulary edges; any other prefixed facet can name a cluster; `role:` is the
 map's own output and is excluded from the layout. A library with no prefixed tags still
 produces a citation graph, but every banding facet collapses into one `(unclassified)`
-band and no vocabulary edges form — which is what `zotero-library` is there to fix.
+band and no vocabulary edges form — which is what `zotero-tag` is there to fix.
+
+`vocab.py` records the library's live vocabulary as
+`.claude/skills/zotero-tag/references/vocabulary.md`: every facet value with its holder
+count, each facet measured against the cap, single-holder values flagged, and merge
+candidates proposed for anything over budget. It is generated, gitignored and
+regenerable, so it cannot drift from the library:
+
+```bash
+python3 vocab.py             # refresh from the library
+python3 vocab.py --no-fetch  # from the recorded pull, offline
+```
 
 ## Usage
 

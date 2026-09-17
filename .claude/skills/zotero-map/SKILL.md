@@ -80,7 +80,10 @@ Everything else is disposable. If the graph looks wrong, fix the inputs and rebu
 The map is only as good as the library's tag vocabulary, and it reads specific
 prefixes. A library with none still produces a citation graph, but every banding
 facet collapses into one `(unclassified)` band and no vocabulary edges form at all.
-See the `zotero-library` skill for establishing a vocabulary.
+See the `zotero-tag` skill for establishing and maintaining a vocabulary. It also
+records the live one at `.claude/skills/zotero-tag/references/vocabulary.md`, which
+is the quickest way to see what a library actually carries; `python3 vocab.py`
+regenerates it.
 
 | facet | read for | where |
 |---|---|---|
