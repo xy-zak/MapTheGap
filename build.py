@@ -354,7 +354,6 @@ def resolve_identity(fetch, items, colls, AL):
             "cited_by": cited_by, "tags": tags,
             "collections": [colls.get(c, c) for c in it.get("collections", [])],
             "abstract": (it.get("abstractNote") or "").strip(),
-            "evidence": next((t.split(": ", 1)[1] for t in tags if t.startswith("evidence: ")), None),
             "stored_role": next((t.split(": ", 1)[1] for t in tags if t.startswith("role: ")), None),
             "unresolved": AL["unresolvable"].get(k) or err,
         }
@@ -530,8 +529,6 @@ def tag_affinity(nodes, edges):
             j = len(inter) / len(A | B)
             if j >= TAG_MIN:
                 tag_edges.append({"a": a, "b": b, "j": round(j, 3), "shared": sorted(inter)})
-    for k in nodes:
-        nodes[k]["tag_degree"] = sum(1 for e in tag_edges if k in (e["a"], e["b"]))
     print(f"vocabulary edges: {len(tag_edges)} at Jaccard >= {TAG_MIN:.2f} "
           f"({sum(1 for n in nodes.values() if _lt(n))} items carry affinity facets)")
     return tag_edges, TAG_MIN

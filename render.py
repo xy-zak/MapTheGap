@@ -195,7 +195,9 @@ def main():
         n["rank"] = i
 
     payload = {
-        "meta": {k: G[k] for k in ("generated", "threshold", "counts")},
+        # counts stays in graph.json, where a human reads it; the page derives its
+        # own totals from the arrays it was given, so shipping them twice invited drift
+        "meta": {k: G[k] for k in ("generated", "threshold")},
         "bands": bands, "band_default": DEFAULT_BAND,
         "w": W, "h": H, "axis_top": TOP - 22,
         "layout": {"lane_h": LANE_H, "top": TOP, "label_h": LABEL_H, "gap": GAP, "collapsed_h": 10},
@@ -203,8 +205,8 @@ def main():
                   for y in range(YSTART, YEND + 1, 10)],
         "breakx": round(xs(YBREAK), 1),
         "nodes": [{k: n[k] for k in ("key", "title", "creators", "year", "date", "role", "role_source",
-                                     "evidence", "cited_by", "in_degree", "out_degree", "tags",
-                                     "collections", "abstract", "itemType", "doi", "unresolved",
+                                     "cited_by", "in_degree", "out_degree", "tags",
+                                     "abstract", "itemType", "doi", "unresolved",
                                      "x", "r", "section", "lane", "rank", "date_added")} for n in nodes.values()],
         "edges": G["edges"],
         "tag_edges": G.get("tag_edges", []),

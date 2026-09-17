@@ -208,11 +208,10 @@ def vocab_weights(nodes, tag_edges):
             continue
         raw[(e["a"], e["b"])] = sum(idf(t) for t in shared)
     if not raw:
-        return {}, {}
+        return {}
     lo, hi = min(raw.values()), max(raw.values())
     span = (hi - lo) or 1.0
-    out = {k: VOC_MIN + (VOC_MAX - VOC_MIN) * (v - lo) / span for k, v in raw.items()}
-    return out, raw
+    return {k: VOC_MIN + (VOC_MAX - VOC_MIN) * (v - lo) / span for k, v in raw.items()}
 
 
 def louvain(keys, W, resolution=RESOLUTION):
@@ -300,21 +299,17 @@ def label_clusters(com, nodes):
                     cnt[t] += 1
         scored = sorted(
             ((v / len(mem)) * math.log(N / freq[t]), t) for t, v in cnt.items())
-        top = [t.split(": ", 1)[1] for _, t in reversed(scored[-3:])]
-        cols = collections.Counter(
-            x for k in mem for x in (nodes[k]["collections"] or ["—"]))
+        top = [t.split(": ", 1)[1] for _, t in reversed(scored[-1:])]
         out[c] = {
             "id": c, "size": len(mem), "members": mem,
             "label": top[0] if top else "unlabelled",
-            "also": top[1:],
-            "collections": ", ".join(f"{k} {v}" for k, v in cols.most_common()),
         }
     return out
 
 
 def build(G, nodes, radius, frac):
     """Everything the clustering mode needs, as a payload fragment."""
-    voc, raw = vocab_weights(nodes, G.get("tag_edges", []))
+    voc = vocab_weights(nodes, G.get("tag_edges", []))
     cit = [(e["source"], e["target"]) for e in G["edges"]
            if e["source"] != e["target"] and e["source"] in nodes and e["target"] in nodes]
 
@@ -393,8 +388,6 @@ def build(G, nodes, radius, frac):
               "collide": COLLIDE_R, "vmax": V_MAX,
               "lo": SPREAD_LO, "mid": SPREAD_MID, "hi": SPREAD_HI},
         "presets": SPREAD_PRESETS, "preset_default": PRESET_DEFAULT,
-        "voc_range": [round(min(voc.values()), 3), round(max(voc.values()), 3)] if voc else [0, 0],
-        "idf_range": [round(min(raw.values()), 2), round(max(raw.values()), 2)] if raw else [0, 0],
     }
 
 
