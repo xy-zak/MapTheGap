@@ -39,6 +39,16 @@ including the current selection.
 
 - **Python 3** — standard library only. No `pip install`, no virtualenv.
 - **curl** — `build.py` shells out to it for the Zotero calls.
+- **`ZOTERO_MAP_MAILTO`** *(optional, recommended)* — a contact address for the
+  OpenAlex / Semantic Scholar **polite pool**, which is faster and throttled less
+  aggressively than the common pool. Unset is supported: the address is simply
+  omitted from the User-Agent and the OpenAlex query, and `build.py` prints a
+  warning once per run. No address is hardcoded anywhere in this repo.
+
+  ```bash
+  export ZOTERO_MAP_MAILTO=you@example.com
+  ```
+
 - **A Zotero Web API key** at `~/.config/zotero-api.conf`, as a curl config file:
 
   ```
@@ -50,13 +60,16 @@ including the current selection.
   install and its database are never touched.
 
 Data sources for reference lists: [OpenAlex](https://openalex.org) and
-[Semantic Scholar](https://www.semanticscholar.org), both contacted with a polite-pool
-mailto. Responses are cached per DOI under `cache/`.
+[Semantic Scholar](https://www.semanticscholar.org). Responses are cached per DOI
+under `cache/`. Semantic Scholar rate-limits hard and will return `429` for a few
+DOIs on a cold run regardless of the mailto; those failures are deliberately *not*
+cached, so simply re-running retries them.
 
 ## Usage
 
 ```bash
 cd ~/Work/GitHub/MapTheGap
+export ZOTERO_MAP_MAILTO=you@example.com   # optional; joins the API polite pool
 python3 build.py          # add --no-fetch to work from cache only, no network
 python3 render.py
 xdg-open out/map.html

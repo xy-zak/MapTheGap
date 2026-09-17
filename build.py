@@ -18,11 +18,21 @@ CACHE_OA = os.path.join(HERE, "cache", "openalex")
 CACHE_S2 = os.path.join(HERE, "cache", "s2")
 OUT = os.path.join(HERE, "out")
 CURL_CONF = os.path.expanduser("~/.config/zotero-api.conf")
-MAILTO = "264507@buas.nl"
+# OpenAlex and Semantic Scholar both run a "polite pool": calls carrying a contact
+# address get faster and more reliable service. Set ZOTERO_MAP_MAILTO to opt in.
+# Leaving it unset is supported - the address is simply omitted and the calls fall
+# back to the common pool - so no personal address is baked into this file.
+MAILTO = os.environ.get("ZOTERO_MAP_MAILTO", "").strip()
+USER_AGENT = "zotero-map (%s)" % MAILTO if MAILTO else "zotero-map"
 NO_FETCH = "--no-fetch" in sys.argv
 
 for d in (CACHE_OA, CACHE_S2, OUT):
     os.makedirs(d, exist_ok=True)
+
+if not MAILTO and not NO_FETCH:
+    print("WARNING: ZOTERO_MAP_MAILTO unset - OpenAlex and Semantic Scholar calls go "
+          "to the common pool, which is slower and rate-limited more aggressively.")
+    print("   export ZOTERO_MAP_MAILTO=you@example.com   to join the polite pool")
 
 
 # ---------------------------------------------------------------- Zotero
@@ -47,7 +57,7 @@ def zotero_user_id():
 # ---------------------------------------------------------------- external APIs
 
 def _get_json(url, timeout=40):
-    req = urllib.request.Request(url, headers={"User-Agent": "zotero-map (%s)" % MAILTO})
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     return json.load(urllib.request.urlopen(req, timeout=timeout))
 
 
@@ -73,8 +83,9 @@ def openalex_by_doi(doi):
         return json.load(open(f))
     if NO_FETCH:
         return {"error": "not cached, --no-fetch"}
-    url = "https://api.openalex.org/works/doi:%s?mailto=%s" % (
-        urllib.parse.quote(doi, safe=""), MAILTO)
+    url = "https://api.openalex.org/works/doi:%s" % urllib.parse.quote(doi, safe="")
+    if MAILTO:
+        url += "?mailto=" + urllib.parse.quote(MAILTO, safe="")
     try:
         w = _get_json(url)
     except Exception as e:
