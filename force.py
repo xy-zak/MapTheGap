@@ -169,25 +169,41 @@ def _tpl(name):
         return fh.read()
 
 
-def vocab_weights(nodes, tag_edges):
-    """Tag-overlap springs, weighted by how rare the shared tags are.
+def is_facet(tag):
+    """A tag that carries meaning for the layout.
 
-    role: is excluded — it is a computed property of the graph, so letting it
-    pull nodes together would feed the layout its own output.
+    role: is excluded wherever this is used — it is a computed property of the
+    graph, so letting it weight the springs or name a cluster would feed the
+    layout its own output.
     """
-    N = len(nodes)
+    return ": " in tag and not tag.startswith("role:")
+
+
+def tag_freq(nodes):
+    """How many items carry each facet tag.
+
+    Shared by the springs and the cluster labels, which both need it and
+    previously counted it separately.
+    """
     freq = collections.Counter()
     for n in nodes.values():
         for t in n["tags"]:
-            if ": " in t and not t.startswith("role:"):
+            if is_facet(t):
                 freq[t] += 1
+    return freq
+
+
+def vocab_weights(nodes, tag_edges):
+    """Tag-overlap springs, weighted by how rare the shared tags are."""
+    N = len(nodes)
+    freq = tag_freq(nodes)
 
     def idf(t):
         return math.log(N / freq[t]) if freq.get(t) else 0.0
 
     raw = {}
     for e in tag_edges:
-        shared = [t for t in e["shared"] if ": " in t and not t.startswith("role:")]
+        shared = [t for t in e["shared"] if is_facet(t)]
         if e["a"] == e["b"]:
             continue
         raw[(e["a"], e["b"])] = sum(idf(t) for t in shared)
@@ -273,18 +289,14 @@ def label_clusters(com, nodes):
     is for.
     """
     N = len(nodes)
-    freq = collections.Counter()
-    for n in nodes.values():
-        for t in n["tags"]:
-            if ": " in t and not t.startswith("role:"):
-                freq[t] += 1
+    freq = tag_freq(nodes)
     out = {}
     for c in sorted(set(com.values())):
         mem = sorted([k for k in com if com[k] == c])
         cnt = collections.Counter()
         for k in mem:
             for t in nodes[k]["tags"]:
-                if ": " in t and not t.startswith("role:"):
+                if is_facet(t):
                     cnt[t] += 1
         scored = sorted(
             ((v / len(mem)) * math.log(N / freq[t]), t) for t, v in cnt.items())
@@ -300,7 +312,7 @@ def label_clusters(com, nodes):
     return out
 
 
-def build(G, nodes, radius):
+def build(G, nodes, radius, frac):
     """Everything the clustering mode needs, as a payload fragment."""
     voc, raw = vocab_weights(nodes, G.get("tag_edges", []))
     cit = [(e["source"], e["target"]) for e in G["edges"]
@@ -332,6 +344,13 @@ def build(G, nodes, radius):
     gutter = [k for k in keys if deg[k] == 0]
 
     com = louvain(sim, W)
+    # The skill requires two runs to land bit-identically, and names the failure it
+    # guards against: "a nonzero delta means an RNG or an unsorted iteration has
+    # crept in". louvain() is the one place that could reintroduce it, so the
+    # property is asserted rather than trusted — recompute from a reversed node
+    # order and require the same answer. 1.6ms on this library.
+    assert louvain(sim[::-1], W) == com, (
+        "louvain is order-dependent: an unsorted iteration has crept in")
     clusters = label_clusters(com, nodes)
 
     # deterministic seed: the timeline's own year scale on x, community band on y.
@@ -346,9 +365,11 @@ def build(G, nodes, radius):
     # are deterministic, and x is the timeline's own year scale in both cases.
     seed = {}
     for i, k in enumerate(sim):
-        yr = min(max(nodes[k]["year"] or 1960, 1960), 2030)
-        fx = (0.40 * (yr - 1960) / 40) if yr <= 2000 else 0.40 + 0.60 * (yr - 2000) / 30
-        seed[k] = [round(fx * 1000, 2),
+        # `frac` is the timeline's own year scale, passed in rather than restated.
+        # This was a second copy of that formula, with 1960/2000/2030 and the 0.40
+        # decade break written out again, so moving the timeline's break would have
+        # silently desynchronised the clustering seed from the view it seeds from.
+        seed[k] = [round(frac(nodes[k]["year"]) * 1000, 2),
                    round(60 + ((i * 0.6180339887498949) % 1) * 760, 2),
                    round(420 + (com[k] * 137 % 520) + (i % 7) * 3.0, 2)]
 

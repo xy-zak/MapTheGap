@@ -13,7 +13,6 @@ import force   # the clustering layout lives there; see its module docstring
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES = os.path.join(HERE, "templates")
-G = json.load(open(os.path.join(HERE, "out", "graph.json")))
 
 
 def _tpl(name):
@@ -108,8 +107,11 @@ def xs(year):
 BAND_FIELDS = ("question:", "approach:", "subject:")
 DEFAULT_BAND = "question"
 NO_BAND = "(unclassified)"
-
-nodes = {n["key"]: n for n in G["nodes"]}
+# The payload keys bands by facet name without the colon, so the default has to be
+# one of those names. Asserted because the failure was otherwise a KeyError from
+# inside a comprehension, nowhere near the two lines that disagreed.
+assert DEFAULT_BAND in [f.rstrip(":") for f in BAND_FIELDS], (
+    "DEFAULT_BAND %r is not one of BAND_FIELDS %r" % (DEFAULT_BAND, BAND_FIELDS))
 
 
 def radius(n):
@@ -126,7 +128,7 @@ def radius(n):
 LANE_H, TOP, LABEL_H, GAP = 30, 44, 26, 22
 
 
-def build_bands(field):
+def build_bands(nodes, field):
     freq = {}
     for n in nodes.values():
         for t in n["tags"]:
@@ -167,60 +169,68 @@ def build_bands(field):
     return {"sections": secs, "assign": assign}
 
 
-bands = {f.rstrip(":"): build_bands(f) for f in BAND_FIELDS}
+def main():
+    with open(os.path.join(HERE, "out", "graph.json"), encoding="utf-8") as fh:
+        G = json.load(fh)
+    nodes = {n["key"]: n for n in G["nodes"]}
+    bands = {f.rstrip(":"): build_bands(nodes, f) for f in BAND_FIELDS}
 
-for n in nodes.values():
-    n["x"] = round(xs(n["year"]), 1)
-    n["r"] = round(radius(n), 1)
-    n["section"], n["lane"] = bands[DEFAULT_BAND]["assign"][n["key"]]
+    for n in nodes.values():
+        n["x"] = round(xs(n["year"]), 1)
+        n["r"] = round(radius(n), 1)
+        n["section"], n["lane"] = bands[DEFAULT_BAND]["assign"][n["key"]]
 
-# initial canvas height, for the default banding with every band collapsed-to-open
-# as the browser first draws it; relayout() recomputes it on every change
-H = TOP + 10
-for _s in bands[DEFAULT_BAND]["sections"]:
-    H += LABEL_H + _s["lanes"] * LANE_H + GAP
+    # initial canvas height, for the default banding with every band collapsed-to-open
+    # as the browser first draws it; relayout() recomputes it on every change
+    H = TOP + 10
+    for _s in bands[DEFAULT_BAND]["sections"]:
+        H += LABEL_H + _s["lanes"] * LANE_H + GAP
 
-# replay order: position 1 is the first source ever added. Sequential rank, not real
-# time - the gaps between additions carry no meaning here.
-for i, n in enumerate(sorted(nodes.values(), key=lambda n: (n.get("date_added") or "", n["key"])), 1):
-    n["rank"] = i
+    # replay order: position 1 is the first source ever added. Sequential rank, not real
+    # time - the gaps between additions carry no meaning here.
+    for i, n in enumerate(sorted(nodes.values(), key=lambda n: (n.get("date_added") or "", n["key"])), 1):
+        n["rank"] = i
 
-payload = {
-    "meta": {k: G[k] for k in ("generated", "threshold", "counts")},
-    "bands": bands, "band_default": DEFAULT_BAND,
-    "w": W, "h": H, "axis_top": TOP - 22,
-    "layout": {"lane_h": LANE_H, "top": TOP, "label_h": LABEL_H, "gap": GAP, "collapsed_h": 10},
-    "ticks": [{"year": y, "x": round(xs(y), 1), "major": y % 20 == 0}
-              for y in range(YSTART, YEND + 1, 10)],
-    "breakx": round(xs(YBREAK), 1),
-    "nodes": [{k: n[k] for k in ("key", "title", "creators", "year", "date", "role", "role_source",
-                                 "evidence", "cited_by", "in_degree", "out_degree", "tags",
-                                 "collections", "abstract", "itemType", "doi", "unresolved",
-                                 "x", "r", "section", "lane", "rank", "date_added")} for n in nodes.values()],
-    "edges": G["edges"],
-    "tag_edges": G.get("tag_edges", []),
-    "tag_min": G.get("tag_min"),
-    # Everything the clustering mode needs. Recomputed here on every render, like
-    # every other derived value on this page — nothing is written back.
-    "force": force.build(G, nodes, radius),
-}
+    payload = {
+        "meta": {k: G[k] for k in ("generated", "threshold", "counts")},
+        "bands": bands, "band_default": DEFAULT_BAND,
+        "w": W, "h": H, "axis_top": TOP - 22,
+        "layout": {"lane_h": LANE_H, "top": TOP, "label_h": LABEL_H, "gap": GAP, "collapsed_h": 10},
+        "ticks": [{"year": y, "x": round(xs(y), 1), "major": y % 20 == 0}
+                  for y in range(YSTART, YEND + 1, 10)],
+        "breakx": round(xs(YBREAK), 1),
+        "nodes": [{k: n[k] for k in ("key", "title", "creators", "year", "date", "role", "role_source",
+                                     "evidence", "cited_by", "in_degree", "out_degree", "tags",
+                                     "collections", "abstract", "itemType", "doi", "unresolved",
+                                     "x", "r", "section", "lane", "rank", "date_added")} for n in nodes.values()],
+        "edges": G["edges"],
+        "tag_edges": G.get("tag_edges", []),
+        "tag_min": G.get("tag_min"),
+        # Everything the clustering mode needs. Recomputed here on every render, like
+        # every other derived value on this page — nothing is written back.
+        "force": force.build(G, nodes, radius, frac),
+    }
 
 
-out = fill(load_template(), {
-    "GEN": G["generated"],
-    "FCSS": force.CSS,
-    "FJS": force.JS,
-    "FXCSS": force.EXPORT_CSS,
-    # <\/ so a title or abstract containing "</script>" cannot close the data block
-    "DATA": json.dumps(payload, separators=(",", ":")).replace("</", "<\\/"),
-})
-p = os.path.join(HERE, "out", "map.html")
-with open(p, "w", encoding="utf-8") as fh:
-    fh.write(out)
-print("wrote %s (%.0f KB) — %d nodes, %d edges, canvas %dx%d" % (
-    p, len(out) / 1024, len(payload["nodes"]), len(payload["edges"]), W, H))
-for f in bands:
-    secs = bands[f]["sections"]
-    print("   band by %-9s %2d rows, %3d lanes  %s"
-          % (f, len(secs), sum(s["lanes"] for s in secs),
-             " ".join("%s(%d)" % (s["name"][:18], s["count"]) for s in secs)))
+    out = fill(load_template(), {
+        "GEN": G["generated"],
+        "FCSS": force.CSS,
+        "FJS": force.JS,
+        "FXCSS": force.EXPORT_CSS,
+        # <\/ so a title or abstract containing "</script>" cannot close the data block
+        "DATA": json.dumps(payload, separators=(",", ":")).replace("</", "<\\/"),
+    })
+    p = os.path.join(HERE, "out", "map.html")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(out)
+    print("wrote %s (%.0f KB) — %d nodes, %d edges, canvas %dx%d" % (
+        p, len(out) / 1024, len(payload["nodes"]), len(payload["edges"]), W, H))
+    for f in bands:
+        secs = bands[f]["sections"]
+        print("   band by %-9s %2d rows, %3d lanes  %s"
+              % (f, len(secs), sum(s["lanes"] for s in secs),
+                 " ".join("%s(%d)" % (s["name"][:18], s["count"]) for s in secs)))
+
+
+if __name__ == "__main__":
+    main()
