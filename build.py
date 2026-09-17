@@ -289,34 +289,24 @@ def norm_arxiv(*fields):
     return None
 
 
-def main():
-    ap = argparse.ArgumentParser(
-        description="Build a citation map of a Zotero library.")
-    ap.add_argument("--no-fetch", action="store_true",
-                    help="work from the recorded library and cached API responses "
-                         "only; make no network calls")
-    args = ap.parse_args()
-
-    for d in (CACHE_OA, CACHE_S2, CACHE_ZOTERO, OUT):
-        os.makedirs(d, exist_ok=True)
-
-    if not MAILTO and not args.no_fetch:
-        print("WARNING: ZOTERO_MAP_MAILTO unset - OpenAlex and Semantic Scholar calls go "
-              "to the common pool, which is slower and rate-limited more aggressively.")
-        print("   export ZOTERO_MAP_MAILTO=you@example.com   to join the polite pool")
-
-    fetch = Fetcher.connect(args.no_fetch)
-    AL = json.load(open(os.path.join(HERE, "aliases.json")))
-
-    # 1. pull -----------------------------------------------------------
+def pull(fetch):
+    """The library, minus notes, attachments and anything in the trash."""
     raw = fetch.zotero_all("items", limit=100, itemType="-attachment")
     items = [i["data"] for i in raw
              if i["data"]["itemType"] not in ("note", "attachment")
              and not i["data"].get("deleted")]
     colls = {c["data"]["key"]: c["data"]["name"] for c in fetch.zotero_all("collections", limit=50)}
     print("pulled %d items, %d collections" % (len(items), len(colls)))
+    return items, colls
 
-    # 2. resolve identity ------------------------------------------------
+
+def resolve_identity(fetch, items, colls, AL):
+    """One node per item, with its OpenAlex identity resolved and its facets read off its tags.
+
+    Iterates `items` in the order Zotero returned them, never sorted: that order
+    sets the order of the OpenAlex calls, and so the order of the failure lines in
+    the build summary.
+    """
     nodes, oa_by_key = {}, {}
     for it in items:
         k = it["key"]
@@ -358,8 +348,16 @@ def main():
             "stored_role": next((t.split(": ", 1)[1] for t in tags if t.startswith("role: ")), None),
             "unresolved": AL["unresolvable"].get(k) or err,
         }
+    return nodes, oa_by_key
 
-    # 3. fetch references (OpenAlex, then Semantic Scholar for the gaps) --
+
+def fetch_references(fetch, nodes, oa_by_key):
+    """Reference lists: OpenAlex, then Semantic Scholar for the gaps.
+
+    Iterates nodes.items() rather than sorted(nodes) for the same reason
+    resolve_identity iterates `items` unsorted - it fixes the order of the
+    Semantic Scholar calls, and so of the FETCH FAILED lines.
+    """
     refs, doi_refs, arxiv_refs = {}, {}, {}
     fallbacks = 0
     for k, n in nodes.items():
@@ -380,6 +378,15 @@ def main():
                         arxiv_refs[k].add(norm_arxiv("arXiv:" + str(ex["ArXiv"])))
     missing = [k for k, n in nodes.items()
                if not refs[k] and not doi_refs[k] and not arxiv_refs[k]]
+    return refs, doi_refs, arxiv_refs, fallbacks, missing
+
+
+def report_fetch(fetch, refs, fallbacks, missing):
+    """How much of the graph is missing, and why. Prints only.
+
+    Its own step, between fetching and edge building, so these lines keep their
+    position in the transcript.
+    """
     print("reference lists: %d from OpenAlex, %d recovered via Semantic Scholar, "
           "%d FAILED, %d with none available"
           % (sum(1 for v in refs.values() if v), fallbacks,
@@ -392,7 +399,9 @@ def main():
         print("   ^ these carry no outbound edges in this build. The failure is not "
               "cached, so re-running retries them.")
 
-    # 4. build edges -----------------------------------------------------
+
+def build_edges(nodes, refs, doi_refs, arxiv_refs, AL):
+    """Citation edges, by whichever identifier resolves to a node in this library."""
     id2key, doi2key, arxiv2key = {}, {}, {}
     for k, n in nodes.items():
         for i in n["ids"]:
@@ -444,8 +453,15 @@ def main():
         len(edges), sum(1 for e in edges if e["via"] == "openalex"),
         sum(1 for e in edges if e["via"] == "semanticscholar"),
         sum(1 for e in edges if e["via"] == "manual")))
+    return edges, indeg, outdeg
 
-    # 5. classify --------------------------------------------------------
+
+def classify(nodes, indeg, outdeg):
+    """Assign each node a role, and describe the threshold used.
+
+    Returns the threshold as graph.json records it, which keeps PCTILE local to
+    the comment that justifies it.
+    """
     # Percentile-based so the threshold stays meaningful as the library grows: a
     # fixed constant would let the foundational set drift upward in count as
     # sources are added.
@@ -471,8 +487,12 @@ def main():
             n["role"], n["role_source"] = "additional", "computed"
         else:
             n["role"], n["role_source"] = "satellite", "computed"
+    return {"foundational_in_degree": thresh,
+            "basis": "max(3, %dth percentile of non-zero in-degree)" % round(PCTILE * 100)}
 
-    # 6. tag affinity ----------------------------------------------------
+
+def tag_affinity(nodes, edges):
+    """Shared-vocabulary edges, where no citation already joins the pair."""
     # Shared vocabulary, not shared citation. Restricted to the two conceptual
     # facets: lens (which tradition) and theme (which argument). Emitted only where
     # no citation edge already joins the pair — where one exists it says strictly
@@ -503,13 +523,16 @@ def main():
         nodes[k]["tag_degree"] = sum(1 for e in tag_edges if k in (e["a"], e["b"]))
     print("vocabulary edges: %d at Jaccard >= %.2f (%d items carry affinity facets)"
           % (len(tag_edges), TAG_MIN, sum(1 for n in nodes.values() if _lt(n))))
+    return tag_edges, TAG_MIN
 
+
+def emit(nodes, edges, tag_edges, threshold, tag_min):
+    """Write out/graph.json and summarise the run."""
     graph = {
         "generated": time.strftime("%Y-%m-%d"),
         "tag_edges": tag_edges,
-        "tag_min": TAG_MIN,
-        "threshold": {"foundational_in_degree": thresh,
-                      "basis": "max(3, %dth percentile of non-zero in-degree)" % round(PCTILE * 100)},
+        "tag_min": tag_min,
+        "threshold": threshold,
         "counts": {"nodes": len(nodes), "edges": len(edges),
                    "unresolved": sum(1 for n in nodes.values() if n["unresolved"]),
                    "tag_edges": len(tag_edges),
@@ -519,8 +542,38 @@ def main():
     }
     p = os.path.join(OUT, "graph.json")
     json.dump(graph, open(p, "w"), indent=1, sort_keys=True)
-    print("wrote %s  |  foundational threshold: in-degree >= %d" % (p, thresh))
+    print("wrote %s  |  foundational threshold: in-degree >= %d" % (p, threshold["foundational_in_degree"]))
     print("roles:", dict(Counter(n["role"] for n in nodes.values())))
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Build a citation map of a Zotero library.")
+    ap.add_argument("--no-fetch", action="store_true",
+                    help="work from the recorded library and cached API responses "
+                         "only; make no network calls")
+    args = ap.parse_args()
+
+    for d in (CACHE_OA, CACHE_S2, CACHE_ZOTERO, OUT):
+        os.makedirs(d, exist_ok=True)
+
+    if not MAILTO and not args.no_fetch:
+        print("WARNING: ZOTERO_MAP_MAILTO unset - OpenAlex and Semantic Scholar calls go "
+              "to the common pool, which is slower and rate-limited more aggressively.")
+        print("   export ZOTERO_MAP_MAILTO=you@example.com   to join the polite pool")
+
+    fetch = Fetcher.connect(args.no_fetch)
+
+    AL = json.load(open(os.path.join(HERE, "aliases.json")))
+
+    items, colls = pull(fetch)
+    nodes, oa_by_key = resolve_identity(fetch, items, colls, AL)
+    refs, doi_refs, arxiv_refs, fallbacks, missing = fetch_references(fetch, nodes, oa_by_key)
+    report_fetch(fetch, refs, fallbacks, missing)
+    edges, indeg, outdeg = build_edges(nodes, refs, doi_refs, arxiv_refs, AL)
+    threshold = classify(nodes, indeg, outdeg)
+    tag_edges, tag_min = tag_affinity(nodes, edges)
+    emit(nodes, edges, tag_edges, threshold, tag_min)
 
 
 if __name__ == "__main__":
