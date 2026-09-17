@@ -8,15 +8,18 @@ stored, so they cannot drift. Only judged facts persist: `role: contrarian` tags
 Zotero, and the identity fixes in aliases.json.
 
 Usage:  python3 build.py [--no-fetch]
-        --no-fetch   use cache only; never hit the network
+        --no-fetch   work from the recorded library and cached API responses only;
+                     makes no network calls at all. Needs one prior ordinary run to
+                     have recorded the Zotero pull under cache/zotero/.
 """
 
-import json, os, re, subprocess, sys, time, urllib.parse, urllib.request
+import argparse, json, os, re, subprocess, time, urllib.parse, urllib.request
 from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE_OA = os.path.join(HERE, "cache", "openalex")
 CACHE_S2 = os.path.join(HERE, "cache", "s2")
+CACHE_ZOTERO = os.path.join(HERE, "cache", "zotero")
 OUT = os.path.join(HERE, "out")
 CURL_CONF = os.path.expanduser("~/.config/zotero-api.conf")
 # OpenAlex and Semantic Scholar both run a "polite pool": calls carrying a contact
@@ -25,15 +28,6 @@ CURL_CONF = os.path.expanduser("~/.config/zotero-api.conf")
 # back to the common pool - so no personal address is baked into this file.
 MAILTO = os.environ.get("ZOTERO_MAP_MAILTO", "").strip()
 USER_AGENT = "zotero-map (%s)" % MAILTO if MAILTO else "zotero-map"
-NO_FETCH = "--no-fetch" in sys.argv
-
-for d in (CACHE_OA, CACHE_S2, OUT):
-    os.makedirs(d, exist_ok=True)
-
-if not MAILTO and not NO_FETCH:
-    print("WARNING: ZOTERO_MAP_MAILTO unset - OpenAlex and Semantic Scholar calls go "
-          "to the common pool, which is slower and rate-limited more aggressively.")
-    print("   export ZOTERO_MAP_MAILTO=you@example.com   to join the polite pool")
 
 
 # ---------------------------------------------------------------- Zotero
@@ -55,24 +49,9 @@ def _curl(args, what, show_stderr=True):
     try:
         return json.loads(r.stdout)
     except json.JSONDecodeError:
-        # deliberately does not echo the body - see zotero_user_id below
+        # deliberately does not echo the body - see Fetcher.connect below
         raise SystemExit("Zotero returned a non-JSON body for %s, which usually means the "
                          "key in %s was rejected." % (what, CURL_CONF))
-
-
-def zotero(path, **params):
-    url = "https://api.zotero.org/users/%s/%s" % (USER_ID, path)
-    if params:
-        url += "?" + urllib.parse.urlencode(params)
-    return _curl(["-m", "60", "--config", CURL_CONF, url], path)
-
-
-def zotero_user_id():
-    # never print this response, and never echo curl's stderr for it: the body
-    # echoes the API key back in plaintext
-    return _curl(["-m", "30", "--config", CURL_CONF,
-                  "https://api.zotero.org/keys/current"],
-                 "the API key owner", show_stderr=False)["userID"]
 
 
 # ---------------------------------------------------------------- external APIs
@@ -115,91 +94,173 @@ def _cache_write(path, obj):
     os.replace(tmp, path)
 
 
-# Same contract as S2_FAILURES below, for the OpenAlex side.
-OA_FAILURES = []
+class Fetcher:
+    """Every outbound call, plus the per-run state they accumulate.
+
+    Three things were module globals and are now here: the Zotero user id, which is
+    a network result rather than configuration and so could never be a constant, and
+    the two failure lists. They stay LISTS - keying them by DOI would silently
+    dedupe a DOI that fails twice, and the count is part of the build summary.
+
+    The genuinely constant configuration (cache paths, CURL_CONF, MAILTO,
+    USER_AGENT) stays at module scope, where it reads as configuration.
+    """
+
+    def __init__(self, user_id, no_fetch):
+        self.user_id = user_id
+        self.no_fetch = no_fetch
+        # Reference-list fetches that failed outright, as (doi, error). Kept so the run
+        # can say how much of the graph is missing rather than reporting only what it
+        # found: a failed fetch and a paper that genuinely cites nothing are
+        # indistinguishable in the edge list, and silently conflating them makes
+        # isolated nodes look like findings.
+        self.oa_failures = []
+        self.s2_failures = []
+
+    # ------------------------------------------------------------ Zotero
+
+    @classmethod
+    def connect(cls, no_fetch):
+        """Resolve the library's user id, from the recorded copy when offline.
+
+        Only the integer id is ever written to disk. The /keys/current response
+        echoes the API key back in plaintext, so it is never cached, never printed,
+        and curl's stderr for it is never shown.
+        """
+        cache = os.path.join(CACHE_ZOTERO, "user_id.json")
+        if no_fetch:
+            hit = _cache_read(cache, "the Zotero user id")
+            if hit is None:
+                raise SystemExit(
+                    "--no-fetch has nothing recorded at %s. Run once without "
+                    "--no-fetch to record the library, then --no-fetch works offline."
+                    % cache)
+            return cls(hit, no_fetch)
+        user_id = _curl(["-m", "30", "--config", CURL_CONF,
+                         "https://api.zotero.org/keys/current"],
+                        "the API key owner", show_stderr=False)["userID"]
+        _cache_write(cache, user_id)
+        return cls(user_id, no_fetch)
+
+    def zotero(self, path, **params):
+        url = "https://api.zotero.org/users/%s/%s" % (self.user_id, path)
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
+        return _curl(["-m", "60", "--config", CURL_CONF, url], path)
+
+    def zotero_all(self, path, **params):
+        """Every row of a Zotero endpoint, following pagination, and recorded to cache.
+
+        The un-paginated `limit=100` this replaces was TWO items from silently
+        truncating the library: the items query reports Total-Results 98 today, and at
+        101 the overflow would simply have been dropped, with `pulled %d items` quietly
+        reporting the smaller number.
+
+        No `sort=` is sent, deliberately. The server's default order sets the order in
+        which the OpenAlex and Semantic Scholar calls below are made, and so the order
+        of the failure lines in the build summary; imposing a sort here would reorder
+        output that has nothing to do with sorting.
+
+        The response is recorded so that --no-fetch can honour its promise. Before
+        this it still made three live calls, so the flag could not be used offline at
+        all despite saying "never hit the network".
+        """
+        cache = os.path.join(CACHE_ZOTERO, path + ".json")
+        if self.no_fetch:
+            hit = _cache_read(cache, "the recorded Zotero " + path)
+            if hit is None:
+                raise SystemExit(
+                    "--no-fetch has nothing recorded at %s. Run once without "
+                    "--no-fetch to record the library, then --no-fetch works offline."
+                    % cache)
+            return hit
+        rows, start = [], 0
+        limit = params.pop("limit", 100)
+        while True:
+            page = self.zotero(path, start=start, limit=limit, **params)
+            rows += page
+            if len(page) < limit:
+                break
+            start += limit
+        _cache_write(cache, rows)
+        return rows
+
+    # ------------------------------------------------------- external APIs
+
+    def openalex_by_doi(self, doi):
+        """Resolve a DOI to an OpenAlex work.
+
+        Only successful responses are cached, for the same reason as s2_refs: a cached
+        error is indistinguishable from a cached negative on the next run, so one bad
+        afternoon becomes a permanent hole in the graph. The cost of not caching is a
+        re-request per failing DOI per build at 0.12s, which is nothing.
+
+        A 404 here is usually real rather than transient - the Journal of Law and
+        Economics DOI for Coase 1960 has no OpenAlex record at all - so the point is not
+        that these will succeed next time. It is that the error text reaches the build
+        summary instead of being silently frozen into the cache, where a 404 that means
+        "not indexed" and a 429 that means "ask again" look identical."""
+        f = os.path.join(CACHE_OA, re.sub(r"[^A-Za-z0-9._-]", "_", doi) + ".json")
+        hit = _cache_read(f, doi)
+        if hit is not None:
+            return hit
+        if self.no_fetch:
+            return {"error": "not cached, --no-fetch"}
+        url = "https://api.openalex.org/works/doi:%s" % urllib.parse.quote(doi, safe="")
+        if MAILTO:
+            url += "?mailto=" + urllib.parse.quote(MAILTO, safe="")
+        try:
+            w = _get_json(url)
+        except Exception as e:
+            w = {"error": str(e)[:80]}
+        if "error" in w:
+            self.oa_failures.append((doi, w["error"]))
+        else:
+            _cache_write(f, w)
+        time.sleep(0.12)
+        return w
 
 
-def openalex_by_doi(doi):
-    """Resolve a DOI to an OpenAlex work.
+    def s2_refs(self, doi):
+        """Semantic Scholar fallback. Covers preprints OpenAlex does not index.
+        Unauthenticated and heavily throttled, so back off on 429.
 
-    Only successful responses are cached, for the same reason as s2_refs: a cached
-    error is indistinguishable from a cached negative on the next run, so one bad
-    afternoon becomes a permanent hole in the graph. The cost of not caching is a
-    re-request per failing DOI per build at 0.12s, which is nothing.
+        Only successful responses are cached. Caching the error too - which this did
+        until a 429 storm left eight papers permanently reference-less - turns a
+        transient rate-limit into a permanent hole, because every later run is a cache
+        hit on the failure and never retries.
 
-    A 404 here is usually real rather than transient - the Journal of Law and
-    Economics DOI for Coase 1960 has no OpenAlex record at all - so the point is not
-    that these will succeed next time. It is that the error text reaches the build
-    summary instead of being silently frozen into the cache, where a 404 that means
-    "not indexed" and a 429 that means "ask again" look identical."""
-    f = os.path.join(CACHE_OA, re.sub(r"[^A-Za-z0-9._-]", "_", doi) + ".json")
-    hit = _cache_read(f, doi)
-    if hit is not None:
-        return hit
-    if NO_FETCH:
-        return {"error": "not cached, --no-fetch"}
-    url = "https://api.openalex.org/works/doi:%s" % urllib.parse.quote(doi, safe="")
-    if MAILTO:
-        url += "?mailto=" + urllib.parse.quote(MAILTO, safe="")
-    try:
-        w = _get_json(url)
-    except Exception as e:
-        w = {"error": str(e)[:80]}
-    if "error" in w:
-        OA_FAILURES.append((doi, w["error"]))
-    else:
-        _cache_write(f, w)
-    time.sleep(0.12)
-    return w
-
-
-# Reference-list fetches that failed outright, as (doi, error). Kept so the run can
-# say how much of the graph is missing rather than reporting only what it found: a
-# failed fetch and a paper that genuinely cites nothing are indistinguishable in the
-# edge list, and silently conflating them makes isolated nodes look like findings.
-S2_FAILURES = []
-
-
-def s2_refs(doi):
-    """Semantic Scholar fallback. Covers preprints OpenAlex does not index.
-    Unauthenticated and heavily throttled, so back off on 429.
-
-    Only successful responses are cached. Caching the error too - which this did
-    until a 429 storm left eight papers permanently reference-less - turns a
-    transient rate-limit into a permanent hole, because every later run is a cache
-    hit on the failure and never retries.
-
-    One attempt, not a backoff ladder. The ladder existed because a failure was
-    cached forever, so each paper got exactly one chance and it was worth spending
-    a minute on it. Now that failures are not cached the next run retries anyway,
-    and these 429s are sustained rather than per-request, so re-asking within the
-    same run mostly bought idle time: four attempts cost 65s per failing paper
-    against 5s now. The trailing sleep stays - it paces requests to the roughly one
-    per five seconds the unauthenticated endpoint allows, and dropping it would
-    guarantee the 429s it is there to avoid."""
-    key = re.sub(r"[^A-Za-z0-9._-]", "_", doi)
-    f = os.path.join(CACHE_S2, key + ".json")
-    hit = _cache_read(f, doi)
-    if hit is not None:
-        return hit
-    if NO_FETCH:
-        return {"error": "not cached, --no-fetch"}
-    m = re.match(r"10\.48550/arxiv\.(.+)", doi, re.I)
-    ident = "ARXIV:" + m.group(1) if m else "DOI:" + doi
-    url = ("https://api.semanticscholar.org/graph/v1/paper/%s"
-           "?fields=title,year,externalIds,references.externalIds" % urllib.parse.quote(ident, safe=":"))
-    try:
-        d = _get_json(url)
-        if "error" in d or "message" in d:
-            d = {"error": str(d.get("error") or d.get("message"))[:60]}
-    except Exception as e:
-        d = {"error": str(e)[:80]}
-    if "error" in d:
-        S2_FAILURES.append((doi, d["error"]))
-    else:
-        _cache_write(f, d)
-    time.sleep(5)
-    return d
+        One attempt, not a backoff ladder. The ladder existed because a failure was
+        cached forever, so each paper got exactly one chance and it was worth spending
+        a minute on it. Now that failures are not cached the next run retries anyway,
+        and these 429s are sustained rather than per-request, so re-asking within the
+        same run mostly bought idle time: four attempts cost 65s per failing paper
+        against 5s now. The trailing sleep stays - it paces requests to the roughly one
+        per five seconds the unauthenticated endpoint allows, and dropping it would
+        guarantee the 429s it is there to avoid."""
+        key = re.sub(r"[^A-Za-z0-9._-]", "_", doi)
+        f = os.path.join(CACHE_S2, key + ".json")
+        hit = _cache_read(f, doi)
+        if hit is not None:
+            return hit
+        if self.no_fetch:
+            return {"error": "not cached, --no-fetch"}
+        m = re.match(r"10\.48550/arxiv\.(.+)", doi, re.I)
+        ident = "ARXIV:" + m.group(1) if m else "DOI:" + doi
+        url = ("https://api.semanticscholar.org/graph/v1/paper/%s"
+               "?fields=title,year,externalIds,references.externalIds" % urllib.parse.quote(ident, safe=":"))
+        try:
+            d = _get_json(url)
+            if "error" in d or "message" in d:
+                d = {"error": str(d.get("error") or d.get("message"))[:60]}
+        except Exception as e:
+            d = {"error": str(e)[:80]}
+        if "error" in d:
+            self.s2_failures.append((doi, d["error"]))
+        else:
+            _cache_write(f, d)
+        time.sleep(5)
+        return d
 
 
 # ---------------------------------------------------------------- pipeline
@@ -229,16 +290,30 @@ def norm_arxiv(*fields):
 
 
 def main():
-    global USER_ID
-    USER_ID = zotero_user_id()
+    ap = argparse.ArgumentParser(
+        description="Build a citation map of a Zotero library.")
+    ap.add_argument("--no-fetch", action="store_true",
+                    help="work from the recorded library and cached API responses "
+                         "only; make no network calls")
+    args = ap.parse_args()
+
+    for d in (CACHE_OA, CACHE_S2, CACHE_ZOTERO, OUT):
+        os.makedirs(d, exist_ok=True)
+
+    if not MAILTO and not args.no_fetch:
+        print("WARNING: ZOTERO_MAP_MAILTO unset - OpenAlex and Semantic Scholar calls go "
+              "to the common pool, which is slower and rate-limited more aggressively.")
+        print("   export ZOTERO_MAP_MAILTO=you@example.com   to join the polite pool")
+
+    fetch = Fetcher.connect(args.no_fetch)
     AL = json.load(open(os.path.join(HERE, "aliases.json")))
 
     # 1. pull -----------------------------------------------------------
-    raw = zotero("items", limit=100, itemType="-attachment")
+    raw = fetch.zotero_all("items", limit=100, itemType="-attachment")
     items = [i["data"] for i in raw
              if i["data"]["itemType"] not in ("note", "attachment")
              and not i["data"].get("deleted")]
-    colls = {c["data"]["key"]: c["data"]["name"] for c in zotero("collections", limit=50)}
+    colls = {c["data"]["key"]: c["data"]["name"] for c in fetch.zotero_all("collections", limit=50)}
     print("pulled %d items, %d collections" % (len(items), len(colls)))
 
     # 2. resolve identity ------------------------------------------------
@@ -248,7 +323,7 @@ def main():
         doi = norm_doi(it.get("DOI"))
         ids, cited_by, oa_year, err = [], None, None, None
         if doi:
-            w = openalex_by_doi(doi)
+            w = fetch.openalex_by_doi(doi)
             if w.get("error"):
                 err = w["error"]
             else:
@@ -294,7 +369,7 @@ def main():
         doi_refs[k] = set()
         arxiv_refs[k] = set()
         if not r and n["doi"]:
-            d = s2_refs(n["doi"])
+            d = fetch.s2_refs(n["doi"])
             if not d.get("error"):
                 fallbacks += 1
                 for ref in d.get("references") or []:
@@ -308,12 +383,12 @@ def main():
     print("reference lists: %d from OpenAlex, %d recovered via Semantic Scholar, "
           "%d FAILED, %d with none available"
           % (sum(1 for v in refs.values() if v), fallbacks,
-             len(S2_FAILURES) + len(OA_FAILURES), len(missing)))
-    for doi, err in OA_FAILURES:
+             len(fetch.s2_failures) + len(fetch.oa_failures), len(missing)))
+    for doi, err in fetch.oa_failures:
         print("   OPENALEX FAILED  %-31s %s" % (doi, err))
-    for doi, err in S2_FAILURES:
+    for doi, err in fetch.s2_failures:
         print("   FETCH FAILED  %-34s %s" % (doi, err))
-    if S2_FAILURES or OA_FAILURES:
+    if fetch.s2_failures or fetch.oa_failures:
         print("   ^ these carry no outbound edges in this build. The failure is not "
               "cached, so re-running retries them.")
 

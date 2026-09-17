@@ -14,7 +14,8 @@ build.py      pull → resolve identity → fetch references → build edges →
 render.py     out/graph.json → out/map.html   (both view modes, one page)
 force.py      the clustering layout — imported by render.py, never run directly
 aliases.json  identity fixes; the only hand-maintained data
-cache/        per-DOI API responses — delete a file to force a refetch
+cache/        openalex/ and s2/ per-DOI API responses, plus zotero/ — the recorded
+              library pull. Delete a file to force a refetch.
 ```
 
 Computed values (degree, year, citation counts) are recomputed every run and never
@@ -61,7 +62,9 @@ including the current selection.
 
 Data sources for reference lists: [OpenAlex](https://openalex.org) and
 [Semantic Scholar](https://www.semanticscholar.org). Responses are cached per DOI
-under `cache/`. Semantic Scholar rate-limits hard and will return `429` for a few
+under `cache/`, and the Zotero pull itself is recorded under `cache/zotero/` so that
+`--no-fetch` can run with no network at all. One ordinary run is needed first to
+record it. Semantic Scholar rate-limits hard and will return `429` for a few
 DOIs on a cold run regardless of the mailto; those failures are deliberately *not*
 cached, so simply re-running retries them.
 
