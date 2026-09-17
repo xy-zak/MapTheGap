@@ -12,6 +12,7 @@ Usage:  python3 build.py [--no-fetch]
 """
 
 import json, os, re, subprocess, sys, time, urllib.parse, urllib.request
+from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE_OA = os.path.join(HERE, "cache", "openalex")
@@ -37,21 +38,41 @@ if not MAILTO and not NO_FETCH:
 
 # ---------------------------------------------------------------- Zotero
 
+def _curl(args, what, show_stderr=True):
+    """Run curl and return the parsed body, or fail with a message that names the cause.
+
+    Without the exit-status check a missing or unreadable curl config surfaces as
+    `Expecting value: line 1 column 1` from inside a JSON parser, which points
+    nowhere near the actual problem.
+    """
+    r = subprocess.run(["curl", "-s"] + args, capture_output=True, text=True)
+    if r.returncode != 0 or not r.stdout.strip():
+        tail = r.stderr.strip()[:200]
+        detail = " - %s" % tail if show_stderr and tail else ""
+        raise SystemExit("curl failed fetching %s (exit %d). Check that %s exists, is "
+                         "readable, and carries a Zotero-API-Key header.%s"
+                         % (what, r.returncode, CURL_CONF, detail))
+    try:
+        return json.loads(r.stdout)
+    except json.JSONDecodeError:
+        # deliberately does not echo the body - see zotero_user_id below
+        raise SystemExit("Zotero returned a non-JSON body for %s, which usually means the "
+                         "key in %s was rejected." % (what, CURL_CONF))
+
+
 def zotero(path, **params):
     url = "https://api.zotero.org/users/%s/%s" % (USER_ID, path)
     if params:
         url += "?" + urllib.parse.urlencode(params)
-    r = subprocess.run(["curl", "-s", "-m", "60", "--config", CURL_CONF, url],
-                       capture_output=True, text=True)
-    return json.loads(r.stdout)
+    return _curl(["-m", "60", "--config", CURL_CONF, url], path)
 
 
 def zotero_user_id():
-    r = subprocess.run(["curl", "-s", "-m", "30", "--config", CURL_CONF,
-                        "https://api.zotero.org/keys/current"],
-                       capture_output=True, text=True)
-    # never print this response: it echoes the API key back in plaintext
-    return json.loads(r.stdout)["userID"]
+    # never print this response, and never echo curl's stderr for it: the body
+    # echoes the API key back in plaintext
+    return _curl(["-m", "30", "--config", CURL_CONF,
+                  "https://api.zotero.org/keys/current"],
+                 "the API key owner", show_stderr=False)["userID"]
 
 
 # ---------------------------------------------------------------- external APIs
@@ -59,6 +80,39 @@ def zotero_user_id():
 def _get_json(url, timeout=40):
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     return json.load(urllib.request.urlopen(req, timeout=timeout))
+
+
+def _cache_read(path, what):
+    """A cached response, or None when there is nothing usable on disk.
+
+    A killed build can leave a half-written file behind, and a cold build is slow
+    enough - Semantic Scholar alone sleeps 5s per fetch - that interrupting one is
+    routine. Before this, a single truncated file made every later run crash in
+    json.load with a manual `rm` as the only recovery. The warning is the point: a
+    silent miss would conflate "corrupt" with "cites nothing", which is exactly the
+    conflation the failure reporting below exists to prevent.
+    """
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        print("WARNING: unreadable cache entry for %s (%s) - refetching: %s"
+              % (what, os.path.basename(path), e))
+        return None
+
+
+def _cache_write(path, obj):
+    """Write through a temp file, so an interrupted run cannot leave a partial entry.
+
+    The .tmp name cannot collide with a lookup: every cache path is a sanitised
+    identifier plus ".json".
+    """
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(obj, fh)
+    os.replace(tmp, path)
 
 
 # Same contract as S2_FAILURES below, for the OpenAlex side.
@@ -79,8 +133,9 @@ def openalex_by_doi(doi):
     summary instead of being silently frozen into the cache, where a 404 that means
     "not indexed" and a 429 that means "ask again" look identical."""
     f = os.path.join(CACHE_OA, re.sub(r"[^A-Za-z0-9._-]", "_", doi) + ".json")
-    if os.path.exists(f):
-        return json.load(open(f))
+    hit = _cache_read(f, doi)
+    if hit is not None:
+        return hit
     if NO_FETCH:
         return {"error": "not cached, --no-fetch"}
     url = "https://api.openalex.org/works/doi:%s" % urllib.parse.quote(doi, safe="")
@@ -93,7 +148,7 @@ def openalex_by_doi(doi):
     if "error" in w:
         OA_FAILURES.append((doi, w["error"]))
     else:
-        json.dump(w, open(f, "w"))
+        _cache_write(f, w)
     time.sleep(0.12)
     return w
 
@@ -124,8 +179,9 @@ def s2_refs(doi):
     guarantee the 429s it is there to avoid."""
     key = re.sub(r"[^A-Za-z0-9._-]", "_", doi)
     f = os.path.join(CACHE_S2, key + ".json")
-    if os.path.exists(f):
-        return json.load(open(f))
+    hit = _cache_read(f, doi)
+    if hit is not None:
+        return hit
     if NO_FETCH:
         return {"error": "not cached, --no-fetch"}
     m = re.match(r"10\.48550/arxiv\.(.+)", doi, re.I)
@@ -141,7 +197,7 @@ def s2_refs(doi):
     if "error" in d:
         S2_FAILURES.append((doi, d["error"]))
     else:
-        json.dump(d, open(f, "w"))
+        _cache_write(f, d)
     time.sleep(5)
     return d
 
@@ -336,9 +392,7 @@ def main():
             n["role"], n["role_source"] = "contrarian", "judged"
         elif indeg[k] >= thresh:
             n["role"], n["role_source"] = "foundational", "computed"
-        elif outdeg[k] >= 1:
-            n["role"], n["role_source"] = "additional", "computed"
-        elif indeg[k] >= 1:
+        elif outdeg[k] >= 1 or indeg[k] >= 1:
             n["role"], n["role_source"] = "additional", "computed"
         else:
             n["role"], n["role_source"] = "satellite", "computed"
@@ -391,7 +445,6 @@ def main():
     p = os.path.join(OUT, "graph.json")
     json.dump(graph, open(p, "w"), indent=1, sort_keys=True)
     print("wrote %s  |  foundational threshold: in-degree >= %d" % (p, thresh))
-    from collections import Counter
     print("roles:", dict(Counter(n["role"] for n in nodes.values())))
 
 
