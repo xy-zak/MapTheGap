@@ -71,6 +71,22 @@ record it. Semantic Scholar rate-limits hard and will return `429` for a few
 DOIs on a cold run regardless of the mailto; those failures are deliberately *not*
 cached, so simply re-running retries them.
 
+## Skills for Claude Code
+
+The repo ships two skills under `.claude/skills/`, so anyone who clones it gets them
+without installing anything:
+
+| skill | covers |
+|---|---|
+| `zotero-map` | this tooling — the routine, the classification rules, the layout decisions and what to verify before believing a build |
+| `zotero-library` | the prefixed tag vocabulary the map reads, plus filing, duplicates and Zotero Web API mechanics |
+
+The map reads `subject:`, `question:` and `approach:` tags for its three banding facets
+and its vocabulary edges; any other prefixed facet can name a cluster; `role:` is the
+map's own output and is excluded from the layout. A library with no prefixed tags still
+produces a citation graph, but every banding facet collapses into one `(unclassified)`
+band and no vocabulary edges form — which is what `zotero-library` is there to fix.
+
 ## Usage
 
 ```bash

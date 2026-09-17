@@ -4,6 +4,10 @@ out/
 # Per-DOI API response cache (OpenAlex / Semantic Scholar); regenerable
 cache/
 
+# Per-user Claude Code settings. The skills under .claude/skills/ ARE committed -
+# they ship with the project - but local overrides are personal.
+.claude/settings.local.json
+
 # Python
 __pycache__/
 *.py[cod]
