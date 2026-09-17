@@ -1,0 +1,47 @@
+{
+  "_comment": "Work-identity fixes. Computed values are never stored here - only things the APIs get wrong or cannot know.",
+  "work_aliases": {
+    "_comment": "Zotero item key -> extra OpenAlex work IDs that citing papers actually point at. OpenAlex fragments book records across editions and reviews.",
+    "CJ73BDBX": [
+      "https://openalex.org/W2175723801",
+      "https://openalex.org/W1503763123"
+    ],
+    "6AQDSEIR": [
+      "https://openalex.org/W1994062728"
+    ],
+    "WHA6GND5": [
+      "https://openalex.org/W1570223482",
+      "https://openalex.org/W2331296304"
+    ],
+    "KKMT7ARU": [
+      "https://openalex.org/W7131363695"
+    ],
+    "9YM6K6W8": [
+      "https://openalex.org/W4415118130"
+    ],
+    "JRENDNHS": [
+      "https://openalex.org/W3210010051"
+    ],
+    "PC4F3KUU": [
+      "https://openalex.org/W2131740028"
+    ],
+    "5HUDH2NP": [
+      "https://openalex.org/W3169717035"
+    ]
+  },
+  "manual_openalex_ids": {
+    "_comment": "For items with no DOI. Empty until a real ID is confirmed - a wrong ID is worse than none."
+  },
+  "manual_edges": {
+    "_comment": "[citing_key, cited_key] pairs established by reading the paper, where no index has the reference.",
+    "edges": []
+  },
+  "unresolvable": {
+    "_comment": "Known-bad identifiers, recorded so the build stops retrying and the map can say why.",
+    "7EY7CECK": "Ostrom 2010 AER: DOI 10.1257/aer.100.3.641 has no OpenAlex record. The only matching work is the Transnational Corporations Review printing (W1968869144), which is a separate Zotero item. Nothing in the library references either.",
+    "PE86PTWK": "MOSAIKS: arXiv DOI 10.48550/ARXIV.2010.08168 404s in OpenAlex; the published Nature Communications version is a different record. Its three inbound edges now arrive via Semantic Scholar's ArXiv id instead, so it is no longer isolated - the OpenAlex gap itself is still real.",
+    "_note_evolution_of_cooperation": "WHA6GND5 is Axelrod's 1984 book. OpenAlex W2062663664 (Axelrod & Hamilton 1981, Science, 10.1126/science.7466396) shares the title and is cited by 3 library items, but it is a different work by different authors and is deliberately NOT aliased. The two records that are aliased are book reviews whose citation counts (3905, 1484) show that citing papers point at them when they mean the book.",
+    "_note_coase_1960": "PC4F3KUU Coase 1960 'The Problem of Social Cost'. The Zotero record holds the Journal of Law and Economics DOI 10.1086/466560, which has no OpenAlex record at all, so identity resolution returned nothing and the paper sat isolated. W2131740028 is the 1960 record OpenAlex actually indexes (10,762 citations) and is the one two library items reference. Demsetz (G66UZ7QW) was checked at the same time and needs no alias: OpenAlex holds only the 1974 reprint record, which the Zotero entry already points at, so its single inbound citation is real rather than an artefact.",
+    "_note_barlow_twins": "5HUDH2NP is recorded as the ICML 2021 paper, which PMLR gives no DOI. OpenAlex splits the work between the arXiv record W3134652006 (778 citations) and the ICML record W3169717035 (9); the item now carries the arXiv DOI so it resolves to the former, and the latter is listed under work_aliases so either matches. Neither alias is what actually connects it: TESSERA and TESSERA v2 reach it through Semantic Scholar, which reports this reference as {ArXiv, DBLP, CorpusId} and no DOI at all. build.py matched S2 references on DOI alone until 16 September 2026 and dropped all ten such edges silently."
+  }
+}

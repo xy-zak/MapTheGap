@@ -1,0 +1,14 @@
+# Generated artifacts — rebuild with build.py && render.py
+out/
+
+# Per-DOI API response cache (OpenAlex / Semantic Scholar); regenerable
+cache/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Never commit credentials. The Zotero API key lives in
+# ~/.config/zotero-api.conf, outside this repo, and must stay there.
+*.conf
+.env
