@@ -1,0 +1,28 @@
+
+/* --- mode switch + clustering --- */
+.modesw{display:flex;gap:0;margin-left:auto}
+.msw{appearance:none;background:transparent;border:1px solid var(--line);
+  font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--dimmer);
+  padding:3px 10px;cursor:pointer;text-transform:uppercase;margin-left:-1px}
+.msw:hover{color:var(--accent)}
+.msw[aria-pressed="true"]{color:var(--bg);background:var(--accent);border-color:var(--accent);font-weight:700}
+.msw:focus-visible{outline:1px solid var(--accent);outline-offset:2px}
+body[data-mode="cluster"] .tl{display:none!important}
+body[data-mode="timeline"] .cl{display:none!important}
+.hull{fill:var(--accent);fill-opacity:.028;stroke:var(--accent);stroke-opacity:.42;
+  stroke-width:1.1;stroke-dasharray:5 4;pointer-events:none}
+/* the cluster holding the selected source: solid, so "which group is this in" is
+   answered by one glance rather than by tracing a dashed line */
+.hull.on{stroke-dasharray:none;stroke-opacity:1;stroke-width:1.7;fill-opacity:.055}
+/* The label is boxed rather than haloed because it sits on top of everything,
+   including dense node clusters, where a halo alone still reads as noise. */
+.hulllbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.15em;fill:var(--accent);
+  font-weight:700;pointer-events:none}
+.hullbox{fill:var(--panel);stroke:var(--accent);stroke-width:1.2;pointer-events:none}
+/* leader from a cluster's label back to its outline, so the label can sit clear
+   of the nodes instead of on top of them */
+/* Same stroke as .hullbox below — same width AND same strength, so the leader and
+   the box it comes out of read as one drawn object rather than two. */
+.hullline{stroke:var(--accent);stroke-width:1.2;fill:none;pointer-events:none}
+.gutlbl{font-family:var(--mono);font-size:10px;letter-spacing:.11em;fill:var(--dimmer)}
+.gutrule{stroke:var(--line);stroke-width:1;stroke-dasharray:3 4}

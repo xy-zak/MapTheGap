@@ -13,6 +13,9 @@ The output is a single self-contained HTML page with two views of the same data.
 build.py      pull → resolve identity → fetch references → build edges → classify → out/graph.json
 render.py     out/graph.json → out/map.html   (both view modes, one page)
 force.py      the clustering layout — imported by render.py, never run directly
+templates/    the page itself: map.html + map.css + map.js, and cluster.css,
+              cluster.js, cluster.export.css for the clustering layer. Real CSS
+              and JS on disk rather than Python string literals.
 aliases.json  identity fixes; the only hand-maintained data
 cache/        openalex/ and s2/ per-DOI API responses, plus zotero/ — the recorded
               library pull. Delete a file to force a refetch.

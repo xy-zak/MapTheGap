@@ -1,0 +1,11 @@
+
+.hull{fill:#8a655c;fill-opacity:.045;stroke:#8a655c;stroke-opacity:.42;
+  stroke-width:1.1;stroke-dasharray:5 4}
+.hull.on{stroke-dasharray:none;stroke-opacity:1;stroke-width:1.7;fill-opacity:.075}
+.hulllbl{font-size:10.5px;letter-spacing:.15em;fill:#8a655c;font-weight:700}
+/* Opaque, because the leader line is hidden by being painted over rather than
+   by being clipped — see the draw order in hulls(). */
+.hullbox{fill:#ffffff;stroke:#8a655c;stroke-width:1.2}
+.hullline{stroke:#8a655c;stroke-width:1.2;fill:none}
+.gutlbl{font-size:10px;letter-spacing:.11em;fill:#6f6764}
+.gutrule{stroke:#d7d2cf;stroke-width:1;stroke-dasharray:3 4}
