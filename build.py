@@ -109,6 +109,26 @@ def _cache_write(path: str, obj) -> None:
     os.replace(tmp, path)
 
 
+def _zotero_cache_name(path, params):
+    """The cache filename for a Zotero endpoint plus the query that selected the rows.
+
+    The query has to be part of the name. Keying on the path alone meant
+    items?itemType=-attachment and items?itemType=attachment were the same file, so
+    whichever call ran last silently overwrote the other and the next reader got a
+    recorded pull of the wrong half of the library - with nothing in the file saying
+    which half it held. Nothing in this repo makes both calls, but a caller working
+    against the library alongside a build does, and the failure is silent.
+
+    `limit` is excluded deliberately: it is a pagination detail, and every page size
+    returns the same rows.
+
+    The result stays a sanitised identifier plus ".json", which is what lets
+    _cache_write use a ".tmp" suffix without risking a collision with a lookup.
+    """
+    slug = ",".join(f"{k}={params[k]}" for k in sorted(params))
+    return re.sub(r"[^A-Za-z0-9.,=~_-]", "_", f"{path}~{slug}" if slug else path) + ".json"
+
+
 class Fetcher:
     """Every outbound call, plus the per-run state they accumulate.
 
@@ -176,15 +196,19 @@ class Fetcher:
         The response is recorded so that --no-fetch can honour its promise. Before
         this it still made three live calls, so the flag could not be used offline at
         all despite saying "never hit the network".
+
+        The cache file is named for the path AND the query - see
+        _zotero_cache_name, which exists because naming it for the path alone let two
+        different queries share one file.
         """
-        cache = os.path.join(CACHE_ZOTERO, path + ".json")
+        limit = params.pop("limit", 100)
+        cache = os.path.join(CACHE_ZOTERO, _zotero_cache_name(path, params))
         if self.no_fetch:
             hit = _cache_read(cache, "the recorded Zotero " + path)
             if hit is None:
                 raise _need_recorded(cache)
             return hit
         rows, start = [], 0
-        limit = params.pop("limit", 100)
         while True:
             page = self.zotero(path, start=start, limit=limit, **params)
             rows += page
