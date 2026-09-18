@@ -501,6 +501,18 @@ def classify(nodes, indeg, outdeg):
             "basis": f"max(3, {round(PCTILE * 100)}th percentile of non-zero in-degree)"}
 
 
+# One vocabulary for the whole library: subject (what it is about), question (what
+# problem it addresses) and approach (what tradition or technique it uses) apply to
+# every collection, so a link can form between any two sources.
+#
+# Module level, and recorded in graph.json as "affinity", because two other places
+# need to agree with it: render.py's BAND_FIELDS, and the cluster labelling in
+# force.py. The labelling used to allow any facet, so a cluster could be named by an
+# evidence: tag that had taken no part in forming it. Shipping the list with the
+# graph means the renderer reads what actually built the edges instead of restating it.
+AFFINITY = ("subject:", "question:", "approach:")
+
+
 def tag_affinity(nodes, edges):
     """Shared-vocabulary edges, where no citation already joins the pair."""
     # Shared vocabulary, not shared citation. Restricted to the two conceptual
@@ -508,10 +520,6 @@ def tag_affinity(nodes, edges):
     # no citation edge already joins the pair — where one exists it says strictly
     # more, and drawing both would double the line for no added meaning.
     TAG_MIN = 0.5
-    # One vocabulary for the whole library: subject (what it is about), question (what
-    # problem it addresses) and approach (what tradition or technique it uses) apply to
-    # every collection, so a link can form between any two sources.
-    AFFINITY = ("subject:", "question:", "approach:")
 
     def _lt(n):
         return {x for x in n["tags"] if x.startswith(AFFINITY)}
@@ -538,6 +546,7 @@ def emit(nodes, edges, tag_edges, threshold, tag_min):
     """Write out/graph.json and summarise the run."""
     graph = {
         "generated": time.strftime("%Y-%m-%d"),
+        "affinity": list(AFFINITY),
         "tag_edges": tag_edges,
         "tag_min": tag_min,
         "threshold": threshold,

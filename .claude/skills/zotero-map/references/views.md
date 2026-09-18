@@ -11,7 +11,7 @@ was read in.
 | citations | drawn, bowed | drawn straight, centre to centre |
 | vocabulary | drawn dashed | drawn dashed, thinner and fainter |
 | direction | free from the x-axis: edges point left | colour on selection: red cites, green cited-by |
-| controls | band-by facet, expand/collapse | spread switcher, re-settle, colour by role or year |
+| controls | band-by facet, expand/collapse | re-settle, colour by role or year |
 
 Search, the role filters, the growth scrubber and the detail panel are shared and
 survive a mode switch, including the current selection.
@@ -55,66 +55,121 @@ it honest, both load-bearing:
 The simulation uses **no RNG**, is seeded deterministically, and iterates pre-sorted
 lists, so it must land bit-identically on every run.
 
-### The spread switcher
+### The force constants, and the one operating point
 
-Three buttons — **compact / balanced / distinct** — and **no numbers on the page**. The
-reader never wanted the number; it was a proxy for "how hard are the clusters pulled
-apart", and the words say that directly.
+There is **one fixed arrangement**. The map had a spread switcher — compact / balanced
+/ distinct, three measured positions on a path through the vocabulary rest length, the
+spring-to-repulsion balance and the seed banding — and it is gone. `balanced` is simply
+what the layout is now, and its values are plain constants in `force.py`.
 
-Each is a fixed position on a path through three quantities. The positions live in
-`SPREAD_PRESETS` in `force.py`; `pathOf()` in `templates/cluster.js` derives the rest:
+| constant | value | what it is |
+|---|---|---|
+| `CIT_STR` | 1.0 | citation spring — the strong pull |
+| `VOC_STR` | 0.5 | vocabulary spring — **flat**, half a citation, whatever tags are shared |
+| `CIT_LEN` | 48 (+ both radii) | citation rest length |
+| `VOC_LEN` | 100 | vocabulary rest length — 2.1x the citation one |
+| `BALANCE` | 0.0369 | spring-to-repulsion ratio |
+| `SEED_BAND` | 0.48 | how much of the community-banded seed survives |
 
-| button | path position `u` | seed banding | vocabulary rest length | balance |
-|---|---|---|---|---|
-| compact | 0.00 | 0.00 | 1600 | 0.002 |
-| **balanced** (default) | 0.24 | 0.48 | 497 | 0.037 |
-| distinct | 0.74 | 1.00 | 119 | 0.673 |
+Measured at these settings: **separation 1.83x, zero node overlaps, 66% canvas fill.**
 
-Positions are found by **search, not formula**: separation does not vary smoothly along
-the path, because the simulation settles into slightly different local minima. A preset
-is whichever sampled position lands nearest the target, so nudging one by a step or two
-is not meaningful tuning — re-search if a target changes.
+Four things underneath that are easy to get wrong:
 
-**The labels are a promise about what the picture looks like, and the physics is
-emergent, so re-measure if the library grows substantially.** Import `simStep` and
-`fitAndCollide` from `templates/cluster.js` and run them in node at each position;
-that is how the shipped numbers were obtained. Record what you measure beside the
-positions in `force.py`, as the current comments do, so the next change can be checked
-rather than guessed.
+- **The balance is a ratio, never an absolute strength.** Springs scale by `BALANCE`,
+  repulsion by `1/BALANCE`. An earlier control scaled strength alone and did nothing at
+  all, because the canvas fit undid it. Both spring types scale by the same `BALANCE`;
+  the ratio between a citation and a shared word is the layout's whole claim.
+- **A rest length is a target, not a ceiling.** Past `VOC_LEN` a spring pulls its pair
+  together; *inside* it the spring pushes them apart. `VOC_LEN` was 497 — 10.4x the
+  citation length, about 329 canvas px — and at that length **87 of 148 vocabulary
+  springs were compressed and actively repelling**. The visible symptom was a source
+  sitting well outside its own hull with four dashed lines running into that hull: the
+  springs were satisfied, because a third of a canvas apart was what they asked for.
+  At 100 it is 3 of 148. If the dashed links ever look inert again, measure how many
+  are compressed before touching `VOC_STR`.
+- **`VOC_STR` only means something once the rest length is right.** At `VOC_LEN` 100,
+  sweeping it 0.149 / 0.25 / 0.5 / 0.75 / 1.0 gives 1.68x / 1.71x / 1.83x / 1.94x /
+  1.97x. The same sweep at 497 gave 1.55x -> 1.52x and looked inert, because a stronger
+  compressed spring just pushes harder. Measure the two constants together.
+- **A node's total spring budget is normalised to about one link.** The shared
+  `spring()` helper biases by `1/min(deg)`, which stops a hub being placed by its degree
+  — but it also means four vocabulary links pull about as hard as one. A low-degree
+  source with no citations is held very loosely and may settle outside its own outline.
+  That is weak evidence shown honestly; "it has four dashed lines" is not grounds to
+  expect it to sit tight.
+- **But it does move the communities.** The union graph Louvain reads is weighted the
+  same way the springs are, so `VOC_STR` changes which clusters exist. Going from the
+  old inverse-frequency weights (0.035-0.280) to a flat 0.5 took 8 communities to 7 —
+  a two-item group was absorbed. Expect hull changes from a weight change, not layout
+  changes.
+- A **speed clamp** (`V_MAX`) is load-bearing. Without it a spring-dominated setting
+  diverges outright — millions of pixels across — which the canvas fit then quietly
+  rescales into a plausible-looking but meaningless picture.
 
-Three things underneath that are easy to get wrong:
+**The numbers are a promise about what the picture looks like, and the physics is
+emergent, so re-measure if the library grows substantially.** Port `simStep` and
+`fitAndCollide` and run them at the shipped constants; that is how these figures were
+obtained. Separation does not vary smoothly with any knob, so nudging a constant by a
+step is not meaningful tuning. **Whether one named source lands inside its own hull is
+not a tuning target** — it flips on local-minimum noise. The aggregate to watch is how
+many sources sit outside their own community outline: 11 of 86 at `VOC_LEN` 497, 9 of
+86 at 100. Record what you measure beside the constants, as the comments do.
 
-- **The balance is a ratio, never an absolute strength.** Springs scale by `ATTR`,
-  repulsion by `1/ATTR`. An earlier control scaled strength alone and did nothing at
-  all, because the canvas fit undid it.
-- **On the springs alone, more attraction means LESS separation.** The vocabulary
-  springs are long and reach between clusters, so the more the springs win, the more
-  they haul separate strands into one mass. `distinct` sits at a *higher* `ATTR` than
-  `compact` only because compact also fades out the seed banding.
-- A **speed clamp** (`V_MAX`) is what keeps the range usable. Without it the
-  spring-dominated end diverges outright — millions of pixels across — which the canvas
-  fit then quietly rescales into a plausible-looking but meaningless picture.
+### The seed, and the circularity in it
 
-### The seed, and what `compact` does about it
-
-`seed` ships **two** y components per node: a golden-ratio sweep over the node index
-carrying no community information, and the node's Louvain community, banded. The
-spread switcher blends them.
+`seed` ships **one** y per node: a blend, at `SEED_BAND`, of a golden-ratio sweep over
+the node index carrying no community information and the node's own Louvain community,
+banded. The blend used to happen in the browser so the switcher could move it; with one
+operating point it is done in `force.py` and a single value is shipped.
 
 This matters because the hulls are only an independent check if the layout never sees
 the community labels — and the banded component hands them over at t=0, so the
 arrangement keeps a memory of the bands it started from and the hulls partly validate a
-structure they helped supply. The banded seed is also what puts a floor under
-separation: no amount of spring or repulsion tuning gets below it.
+structure they helped supply.
 
-So `compact` fades the banding out entirely and `balanced` halves it, which is the only
-way a merged view is reachable at all. The honest consequence, which the legend states:
-**at the merged end the layout places every source by its links alone; at the separated
-end it is partly showing an arrangement the seed handed it.** The default sits at the
-banded end because it reads better — a deliberate trade of a modest circularity for
-legibility. Do not silently "fix" the default; the blind seed is one click away.
+Isolating just this knob at the shipped settings: 0.00 -> 1.56x, 0.24 -> 1.65x,
+**0.48 -> 1.83x**, 0.75 -> 2.16x, 1.00 -> 2.15x, zero overlaps throughout. So the
+honest reading is that **the layout does not depend on the banded seed to find its
+clusters** — it finds them at 1.56x from a seed carrying no community information at
+all. The banding buys 0.27 of separation and is kept for legibility, not to manufacture
+the structure. It sits at 0.48 rather than 1.00 because past ~0.75 the seed starts
+dictating the answer outright.
+
+(An earlier note here credited 1.12x to banding-off. That came from the old `compact`
+preset, which also dropped the balance to 0.002 and stretched the vocabulary springs to
+1600 — three changes at once, credited to one of them. Isolate a knob before quoting it.)
 
 ### Hull labels
+
+A label is a **tag value with its facet prefix dropped**: `approach: polycentricity`
+becomes `POLYCENTRICITY`. That is worth knowing before reading a hull name, because a
+bare value can look like it came from nowhere.
+
+The tag is the most **distinctive** one its members share, scored
+`(share within cluster) x log(N / library frequency)` — not the commonest, which would
+name nearly every hull `cross-cutting` (49 of 94 items). For a small cluster whose
+members carry identical tags the share term is 1.0 for every candidate, so the label is
+simply the rarest tag they share.
+
+**Candidates are restricted to the forming facets** — `subject:`, `question:`,
+`approach:` — which is `AFFINITY` in `build.py`, recorded in `graph.json` as
+`"affinity"` and read from there by `force.py` so the two cannot drift. Anything else
+is ineligible, `role:` included.
+
+That restriction is new, and it fixed real nonsense. Labelling previously accepted any
+facet, so `evidence:` could win: a two-member cluster was called `popular / secondary`
+(from `evidence: popular / secondary`, 6 of 94 — the rarest tag its members shared) and
+an 18-member one was called `benchmark / experiments`. Neither facet builds vocabulary
+edges or is read by Louvain, so both names described something the layout had never
+used — the second actively misleading, since those 18 sources were grouped by shared
+remote-sensing and self-supervised-learning vocabulary, not by being benchmark papers.
+They are `game theory` and `self-supervised learning` now. **If a label ever reads like
+it belongs to a different question than the cluster, check which facet it came from
+first.**
+
+A community carrying no forming tag at all is held together by citations alone and has
+no vocabulary to be named after; it comes out `unlabelled` rather than borrowing a
+facet that took no part. None exist on the current library.
 
 Hulls are faint and unlabelled until a source is **selected**, at which point every
 cluster whose area covers it turns solid and names itself in a boxed label, pushed
@@ -122,12 +177,28 @@ outward from the centre onto clear canvas and joined to its outline by a leader 
 Sitting the label just above the hull put it on top of the very nodes the reader was
 looking at.
 
+Every community with at least `HULL_MIN` members gets an outline. That threshold lives
+in `force.py` and is shipped in the payload, so the hull count and the "*n* clusters"
+readout cannot drift apart. It is **2**: it was 3 on the argument that a ring drawn
+around a pair states nothing, but an unringed pair was indistinguishable from two
+sources the maths never grouped, and a pair that Louvain made its own community is a
+claim worth seeing. On this library that draws 7 hulls rather than 5.
+
+A two-member community has no polygon — the convex hull of two points is a line
+segment with no area, and three collinear members collapse the same way. `ringHull()`
+handles that by hulling points sampled on each member's **circle** instead of their
+centres, which yields a real capsule around the pair that is guaranteed to contain the
+node fills. It is reached only when the plain hull has degenerated, so no outline that
+already existed is affected. Raising `HULL_MIN` back to 3 would leave that path
+unreachable; delete it if you do.
+
 Each hull covers its community's **core** — members within 1.6× the median distance
 from its centroid — and its label says how many of the members that is, so a label
 ending `[18/22]` means the outline covers 18 of that community's 22 members and four
 sit outside it. A convex hull over every member is dragged into a huge
 lozenge by the two or three that sit far out, and those lozenges cover each other and
-read as one shapeless overlap.
+read as one shapeless overlap. The core trim only applies from 3 members up; below
+that every member defines the shape.
 
 Coverage is a **point-in-polygon test against the drawn outlines**, not community
 membership: hulls genuinely overlap where communities interleave, so a source at a

@@ -22,18 +22,20 @@ let MODE='timeline', COLOR='role', settled=false, settling=false;
    figure has no selection and nobody to click, so the export raises this and every
    cluster names itself. See exportSVG(). */
 let LABEL_ALL=false;
-/* The spring-to-repulsion balance, driven by the slider. Springs scale by ATTR and
-   repulsion by 1/ATTR, so this is a ratio rather than an absolute strength — which
-   is the only form that survives the canvas fit. See the slider wiring below. */
-/* All three are driven by the spread switcher, through pathOf() below. */
-let ATTR=0.87, VOCLEN=FR.p.voclen, SBAND=1;
+/* The spring-to-repulsion balance: springs scale by BAL, repulsion by 1/BAL, so it
+   is a ratio rather than an absolute strength — the only form that survives the
+   canvas fit. It was a slider once; it is a constant now, and force.py owns it. */
+const BAL=FR.p.balance;
+/* Smallest community that gets a drawn outline. force.py owns the number so the
+   hull count and the '<n> clusters' readout below can never disagree. */
+const HMIN=FR.hullmin;
 
 const gH=el('g',{});svg.insertBefore(gH,gT);      /* hulls, behind every link */
 const gU=el('g',{display:'none'});svg.appendChild(gU);
 const gL=el('g',{});svg.appendChild(gL);          /* hull labels, above everything */
 
 /* ---- the simulation. Velocity Verlet with a cooling schedule, all pairs:
-   89 nodes is 3916 pairs a tick, so no quadtree is worth the code. No RNG is
+   90 nodes is 4005 pairs a tick, so no quadtree is worth the code. No RNG is
    used anywhere, and both the node list and the link lists arrive pre-sorted
    from Python, so the result is bit-identical on every run and every reload. ---- */
 function simStep(alpha){
@@ -44,14 +46,21 @@ function simStep(alpha){
       const b=S[j],pb=P[b];
       let dx=pb.x-pa.x,dy=pb.y-pa.y,d2=dx*dx+dy*dy;
       if(d2<1e-6){dx=0.7;dy=0.31;d2=0.6;}              /* deterministic nudge */
-      const d=Math.sqrt(d2),f=p.repel/ATTR*alpha*(1+0.09*(FRAD[a]+FRAD[b]))/d2;
+      const d=Math.sqrt(d2),f=p.repel/BAL*alpha*(1+0.09*(FRAD[a]+FRAD[b]))/d2;
       const ux=dx/d,uy=dy/d;
       pa.vx+=f*ux;pa.vy+=f*uy;pb.vx-=f*ux;pb.vy-=f*uy;
     }
   }
   /* bias by 1/min(degree): without it a hub's many springs drag it around far
      more than any single neighbour, and the hub ends up placed by its degree
-     rather than by who it cites */
+     rather than by who it cites.
+
+     The cost, worth knowing when reading the map: this normalises a node's TOTAL
+     spring budget to roughly one link's worth, so four vocabulary links pull about
+     as hard as one. A low-degree source with no citations is therefore held very
+     loosely and can settle outside its own community outline. That is the layout
+     being honest about weak evidence, not a bug — but it does mean "it has four
+     dashed lines" is not a reason to expect it to sit tight. */
   const spring=(a,b,s,L)=>{
     const pa=P[a],pb=P[b];if(!pa||!pb)return;
     const dx=pb.x-pa.x,dy=pb.y-pa.y,d=Math.hypot(dx,dy)||0.01;
@@ -59,11 +68,16 @@ function simStep(alpha){
     const f=(d-L)/d*s*alpha*bias,fx=dx*f,fy=dy*f;
     pa.vx+=fx;pa.vy+=fy;pb.vx-=fx;pb.vy-=fy;
   };
-  /* ATTR scales both spring types together, never one against the other: the
-     ratio between a citation and a shared word is the whole claim the layout
-     makes, and the slider must not touch it. */
-  FR.cit.forEach(e=>spring(e[0],e[1],p.citstr*ATTR,p.citlen+FRAD[e[0]]+FRAD[e[1]]));
-  FR.voc.forEach(e=>spring(e[0],e[1],e[2]*ATTR,VOCLEN));
+  /* BAL scales both spring types together, never one against the other: the ratio
+     between a citation and a shared word is the whole claim the layout makes.
+     Every vocabulary link pulls with the same p.vocstr — half a citation.
+
+     p.voclen is the length the spring WANTS, not a ceiling: past it the spring
+     pulls the pair together, inside it the spring pushes them apart. It was once
+     ten times the citation length, which quietly turned most of the dashed links
+     into repulsion; force.py records that. Keep it near the citation length. */
+  FR.cit.forEach(e=>spring(e[0],e[1],p.citstr*BAL,p.citlen+FRAD[e[0]]+FRAD[e[1]]));
+  FR.voc.forEach(e=>spring(e[0],e[1],p.vocstr*BAL,p.voclen));
   let cx=0,cy=0;S.forEach(k=>{cx+=P[k].x;cy+=P[k].y;});cx/=n;cy/=n;
   S.forEach(k=>{const q=P[k];
     q.vx+=(cx-q.x)*p.grav*alpha;q.vy+=(cy-q.y)*p.grav*alpha;
@@ -115,37 +129,11 @@ function fitAndCollide(){
    elapsed and jumps straight to the end. */
 function computeLayout(){
   FR.sim.forEach(k=>{const q=P[k];
-    q.x=FR.seed[k][0];q.y=seedY(k);q.vx=0;q.vy=0;});
+    q.x=FR.seed[k][0];q.y=FR.seed[k][1];q.vx=0;q.vy=0;});
   let alpha=1;const adec=1-Math.pow(0.001,1/FR.p.ticks);
   for(let t=0;t<FR.p.ticks;t++){alpha+=(0-alpha)*adec;simStep(alpha);}
   fitAndCollide();
 }
-
-/* Blend of the two shipped seed components. SBAND 1 is the banded seed the map has
-   always used; SBAND 0 carries no community information, which is the only way the
-   merged end of the slider is reachable. (Named SBAND because BAND is already the
-   timeline's banding facet, over in render.py.) */
-function seedY(k){
-  const z=FR.seed[k];
-  return z[1]+SBAND*(z[2]-z[1]);
-}
-
-/* The spread path. Piecewise so the midpoint can be pinned exactly to the default
-   settings: the lower half fades the seed banding in while lengthening nothing and
-   raising the balance, the upper half shortens the vocabulary springs further.
-   Geometric interpolation on the two lengths, linear on the banding. */
-function pathOf(u){
-  const q=FR.p, geo=(a,b,t)=>a*Math.pow(b/a,t);
-  if(u<=0.5){
-    const t=u/0.5;
-    return [q.lo.band+(q.mid.band-q.lo.band)*t,
-            geo(q.lo.voclen,q.mid.voclen,t), geo(q.lo.attr,q.mid.attr,t)];
-  }
-  const t=(u-0.5)/0.5;
-  return [q.mid.band+(q.hi.band-q.mid.band)*t,
-          geo(q.mid.voclen,q.hi.voclen,t), geo(q.mid.attr,q.hi.attr,t)];
-}
-function applyPath(u){const z=pathOf(u);SBAND=z[0];VOCLEN=z[1];ATTR=z[2];}
 
 function settle(){
   if(settling)return;
@@ -154,7 +142,7 @@ function settle(){
   if(settled){                       /* re-settle: glide from the layout on screen */
     FR.sim.forEach(k=>{sx[k]=P[k].fx;sy[k]=P[k].fy;});
   }else{                             /* first entry: start from the fitted seed */
-    FR.sim.forEach(k=>{const q=P[k];q.x=FR.seed[k][0];q.y=seedY(k);});
+    FR.sim.forEach(k=>{const q=P[k];q.x=FR.seed[k][0];q.y=FR.seed[k][1];});
     fitAndCollide();
     FR.sim.forEach(k=>{sx[k]=P[k].fx;sy[k]=P[k].fy;});
   }
@@ -201,6 +189,29 @@ function hull(pts){
   lo.pop();up.pop();return lo.concat(up);
 }
 
+/* A community of two has no polygon: the convex hull of two points is a line
+   segment, and three collinear members collapse the same way. Such a hull draws as
+   a hairline that encloses nothing and cannot be hit-tested, so before HULL_MIN
+   came down to 2 these communities were simply skipped.
+
+   The fix is to hull points sampled ON EACH MEMBER'S CIRCLE rather than their
+   centres, which yields a real lozenge around the pair and is guaranteed to contain
+   the node fills. It is only reached when the plain hull has degenerated, so every
+   outline that already existed is unchanged — this is an added case, not a new
+   policy for the hulls that were already being drawn. */
+function ringHull(keys){
+  const pts=[];
+  keys.forEach(k=>{
+    if(!P[k])return;
+    const r=(FRAD[k]||4)+7;
+    for(let i=0;i<12;i++){
+      const a=i/12*Math.PI*2;
+      pts.push([P[k].fx+Math.cos(a)*r,P[k].fy+Math.sin(a)*r]);
+    }
+  });
+  return hull(pts);
+}
+
 /* Point in polygon by ray casting. This decides which clusters a source sits in
    VISUALLY, which is a different question from which community Louvain assigned
    it to. The hulls genuinely overlap wherever communities interleave, so a node
@@ -218,8 +229,13 @@ function inPoly(x,y,poly){
 /* Hulls are the INDEPENDENT check on the layout, not decoration. They outline
    Louvain communities computed from the weighted graph without reference to any
    geometry, so a hull that comes out long and tangled means the physics and the
-   maths disagree and that blob should not be believed. Only groups of 3+ get one;
-   a ring drawn around a pair states nothing.
+   maths disagree and that blob should not be believed.
+
+   Every community of FR.hullmin members or more gets an outline. That threshold was
+   3, on the argument that a ring around a pair states nothing; it is 2 now, because
+   a pair the maths made its own community is a claim worth seeing, and an unringed
+   pair was indistinguishable from two sources that were never grouped at all.
+   A two-member hull has no area of its own, so ringHull() supplies one.
 
    Three passes, because the outlines must all exist before anything can be tested
    against them: build every polygon, work out which ones cover the selection, then
@@ -232,9 +248,9 @@ function hulls(){
   /* ---- pass 1: the outlines ---- */
   const polys=[];
   FR.clusters.forEach(c=>{
-    if(c.size<3)return;
+    if(c.size<HMIN)return;
     const mem=c.members.filter(k=>byKey[k]&&vis(byKey[k])&&P[k]);
-    if(mem.length<3)return;
+    if(mem.length<HMIN)return;
     /* A convex hull over every member is dragged into a huge lozenge by the two
        or three that sit far out, and on this library those lozenges cover each
        other and read as one shapeless overlap. So the hull covers the community
@@ -246,8 +262,11 @@ function hulls(){
     const ds=mem.map(k=>Math.hypot(P[k].fx-mx,P[k].fy-my)).sort((a,b)=>a-b);
     const med=ds[Math.floor(ds.length/2)]||1;
     const core=mem.filter(k=>Math.hypot(P[k].fx-mx,P[k].fy-my)<=Math.max(1.6*med,40));
+    /* The core trim only makes sense once there are enough members for an outlier to
+       be meaningful. Below 3 every member defines the shape. */
     const use=core.length>=3?core:mem;
-    const h=hull(use.map(k=>[P[k].fx,P[k].fy]));
+    let h=hull(use.map(k=>[P[k].fx,P[k].fy]));
+    if(h.length<3)h=ringHull(use);     /* a pair, or collinear members */
     if(h.length<3)return;
     let cx=0,cy=0;h.forEach(q=>{cx+=q[0];cy+=q[1];});cx/=h.length;cy/=h.length;
     const ex=h.map(q=>{const dx=q[0]-cx,dy=q[1]-cy,d=Math.hypot(dx,dy)||1;
@@ -434,40 +453,6 @@ document.getElementById('cby').addEventListener('click',e=>{
   COLOR=COLOR==='role'?'year':'role';
   e.currentTarget.textContent='colour: '+COLOR;paint();});
 
-/* The spread switcher. The reader gets three named points on the path and no
-   numbers, because the number was never the thing they wanted — it was a proxy for
-   "how hard are the clusters pulled apart", and the words say that directly.
- 
-   Which way the path runs is still counter-intuitive underneath: "distinct" sits at
-   a HIGHER ATTR than "compact" only because compact also fades out the seed's
-   community banding. On the springs alone, more attraction means less separation,
-   since the long vocabulary springs reach between clusters and haul separate
-   strands into one even mass. That is why the presets are fixed measured positions
-   rather than anything derived at runtime.
- 
-   Measured, in order: compact 1.10x, balanced 1.50x, distinct 1.99x, all with zero
-   node overlaps. Those numbers live in force.py beside the positions; the page
-   deliberately does not show them. */
-const SPC=document.getElementById('spreadctl');
-let PRESET=FR.preset_default;
-FR.presets.forEach((ps,i)=>{
-  const b=document.createElement('button');
-  b.className='bc bf';b.dataset.i=String(i);b.textContent=ps.label;
-  b.setAttribute('aria-pressed',i===PRESET?'true':'false');
-  b.addEventListener('click',()=>{
-    if(PRESET===i)return;
-    PRESET=i;
-    SPC.querySelectorAll('.bf').forEach(x=>
-      x.setAttribute('aria-pressed',x.dataset.i===String(i)?'true':'false'));
-    applyPath(ps.u);
-    settled=false;
-    while(gH.firstChild)gH.removeChild(gH.firstChild);
-    while(gL.firstChild)gL.removeChild(gL.firstChild);
-    settle();
-  });
-  SPC.appendChild(b);
-});
-applyPath(FR.presets[PRESET].u);
 document.getElementById('ccn').textContent=
-  FR.clusters.filter(c=>c.size>=3).length+' clusters \u00b7 '+FR.sim.length+' simulated \u00b7 '
+  FR.clusters.filter(c=>c.size>=HMIN).length+' clusters \u00b7 '+FR.sim.length+' simulated \u00b7 '
   +FR.gutter.length+' unlinked';
