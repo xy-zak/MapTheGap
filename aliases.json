@@ -33,8 +33,81 @@
     "_comment": "For items with no DOI. Empty until a real ID is confirmed - a wrong ID is worse than none."
   },
   "manual_edges": {
-    "_comment": "[citing_key, cited_key] pairs established by reading the paper, where no index has the reference.",
-    "edges": []
+    "_comment": "[citing_key, cited_key] pairs established by reading the paper, where no index has the reference. Applied after the index edges and deduped, so an index that later supplies the same edge simply wins and the entry becomes a no-op. The 2026-09-18 block is the six geospatial-embedding sources added that day: OpenAlex returns a PARTIAL reference list for the two SSRN records (39 and 15 refs, all pre-2021), which build.py treats as success so it never falls back to Semantic Scholar, and S2 has no entry for the arXiv and EarthArXiv preprints. Every pair below was confirmed against the citing paper's own reference list in its stored full text.",
+    "edges": [
+      [
+        "9PKTQJHU",
+        "3EIXBAMJ"
+      ],
+      [
+        "9PKTQJHU",
+        "9YM6K6W8"
+      ],
+      [
+        "9PKTQJHU",
+        "H9NQJVD5"
+      ],
+      [
+        "9PKTQJHU",
+        "PE86PTWK"
+      ],
+      [
+        "RQHVI9PI",
+        "3EIXBAMJ"
+      ],
+      [
+        "RQHVI9PI",
+        "9YM6K6W8"
+      ],
+      [
+        "C6D97ZS5",
+        "3EIXBAMJ"
+      ],
+      [
+        "P7K6SKB5",
+        "3EIXBAMJ"
+      ],
+      [
+        "P7K6SKB5",
+        "VP4SQFER"
+      ],
+      [
+        "P7K6SKB5",
+        "9YM6K6W8"
+      ],
+      [
+        "P7K6SKB5",
+        "L5852RYA"
+      ],
+      [
+        "DWHDJWI3",
+        "3EIXBAMJ"
+      ],
+      [
+        "DWHDJWI3",
+        "9YM6K6W8"
+      ],
+      [
+        "DWHDJWI3",
+        "H9NQJVD5"
+      ],
+      [
+        "DWHDJWI3",
+        "L5852RYA"
+      ],
+      [
+        "DWHDJWI3",
+        "CQMZ7CVJ"
+      ],
+      [
+        "DWHDJWI3",
+        "PE86PTWK"
+      ],
+      [
+        "DWHDJWI3",
+        "KKMT7ARU"
+      ]
+    ]
   },
   "unresolvable": {
     "_comment": "Known-bad identifiers, recorded so the build stops retrying and the map can say why.",
