@@ -7,18 +7,22 @@ Computed values (degree, year, citation counts) are recomputed every run and nev
 stored, so they cannot drift. Only judged facts persist: `role: contrarian` tags in
 Zotero, and the identity fixes in aliases.json.
 
-Usage:  python3 build.py [--no-fetch]
+Usage:  python3 build.py [--no-fetch] [--progress]
         --no-fetch   work from the recorded library and cached API responses only;
                      makes no network calls at all. Needs one prior ordinary run to
                      have recorded the Zotero pull under cache/zotero/.
+        --progress   also write machine-readable progress to stderr, one JSON object
+                     per line, for app.py. stdout is unchanged either way.
 """
 
 import argparse
 import json
 import os
 import re
-import subprocess
+import ssl
+import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter
@@ -28,7 +32,12 @@ CACHE_OA = os.path.join(HERE, "cache", "openalex")
 CACHE_S2 = os.path.join(HERE, "cache", "s2")
 CACHE_ZOTERO = os.path.join(HERE, "cache", "zotero")
 OUT = os.path.join(HERE, "out")
-CURL_CONF = os.path.expanduser("~/.config/zotero-api.conf")
+# The Zotero key. Same path on every platform - ~ is the home folder on macOS and Linux
+# and %USERPROFILE% on Windows - and still in curl's config-file format, so the curl
+# commands in the zotero-library skill read the same file this does. ZOTERO_API_CONF
+# exists so app.py's setup flow can be exercised against a scratch file.
+KEY_FILE = os.environ.get("ZOTERO_API_CONF") or os.path.join(
+    os.path.expanduser("~"), ".config", "zotero-api.conf")
 # OpenAlex and Semantic Scholar both run a "polite pool": calls carrying a contact
 # address get faster and more reliable service. Set ZOTERO_MAP_MAILTO to opt in.
 # Leaving it unset is supported - the address is simply omitted and the calls fall
@@ -39,26 +48,114 @@ USER_AGENT = f"zotero-map ({MAILTO})" if MAILTO else "zotero-map"
 
 # ---------------------------------------------------------------- Zotero
 
-def _curl(args: list, what: str, show_stderr: bool = True):
-    """Run curl and return the parsed body, or fail with a message that names the cause.
-
-    Without the exit-status check a missing or unreadable curl config surfaces as
-    `Expecting value: line 1 column 1` from inside a JSON parser, which points
-    nowhere near the actual problem.
-    """
-    r = subprocess.run(["curl", "-s"] + args, capture_output=True, text=True)
-    if r.returncode != 0 or not r.stdout.strip():
-        tail = r.stderr.strip()[:200]
-        detail = f" - {tail}" if show_stderr and tail else ""
-        raise SystemExit(f"curl failed fetching {what} (exit {r.returncode}). Check that "
-                         f"{CURL_CONF} exists, is readable, and carries a "
-                         f"Zotero-API-Key header.{detail}")
+def zotero_key():
+    """The API key from KEY_FILE, or a SystemExit that says how to provide one."""
     try:
-        return json.loads(r.stdout)
-    except json.JSONDecodeError:
-        # deliberately does not echo the body - see Fetcher.connect below
-        raise SystemExit(f"Zotero returned a non-JSON body for {what}, which usually "
-                         f"means the key in {CURL_CONF} was rejected.")
+        with open(KEY_FILE, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        raise SystemExit(f"No Zotero API key at {KEY_FILE}. Run app.py to link one, or "
+                         "see Requirements in README.md.")
+    m = re.search(r"Zotero-API-Key:\s*([A-Za-z0-9]+)", text)
+    if not m:
+        raise SystemExit(f"{KEY_FILE} carries no Zotero-API-Key header. Run app.py to "
+                         "link the key again.")
+    return m.group(1)
+
+
+CERT_HELP = ("Python could not verify the HTTPS certificate of {host}. With Python from "
+             "python.org on macOS, run 'Install Certificates.command' in the "
+             "Applications/Python 3.x folder once, then try again.")
+
+
+def cert_failure(e):
+    """True when a network error is a missing certificate store, not a bad connection.
+
+    The python.org installer on macOS ships without one until a bundled script is
+    run, and every HTTPS call fails until then. That has to stop the run with the
+    fix spelled out: caught like any other error it would become a FETCH FAILED line
+    per paper, and an empty graph that looks like a finding.
+    """
+    return isinstance(getattr(e, "reason", e), ssl.SSLCertVerificationError)
+
+
+def zotero_http(path, params=None, key=None, headers=None, timeout=30):
+    """GET from the Zotero Web API. Returns (status, headers, body bytes).
+
+    Any HTTP status comes back rather than raising, 304 included, so callers can
+    branch on it. A failed connection raises urllib.error.URLError or OSError.
+
+    Python's own urllib rather than curl, which this used to shell out to: it is the
+    same on macOS, Windows and Linux, reads the system proxy settings on each, and
+    decodes nothing - curl's output came back through the platform's default text
+    encoding, which on Windows is not UTF-8.
+    """
+    url = "https://api.zotero.org/" + path
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={
+        "Zotero-API-Key": key or zotero_key(), "Zotero-API-Version": "3",
+        "User-Agent": USER_AGENT, **(headers or {})})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.headers, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers, e.read()
+
+
+def _zotero_json(path, params, what, timeout):
+    """A Zotero call that must succeed: the parsed body, or a SystemExit naming the cause.
+
+    The body is never echoed into an error. /keys/current returns the key itself.
+    """
+    try:
+        status, _, body = zotero_http(path, params, timeout=timeout)
+    except (urllib.error.URLError, OSError) as e:
+        if cert_failure(e):
+            raise SystemExit(CERT_HELP.format(host="api.zotero.org"))
+        raise SystemExit(f"Could not reach api.zotero.org fetching {what}: "
+                         f"{getattr(e, 'reason', e)}")
+    if status in (401, 403):
+        raise SystemExit(f"Zotero rejected the key in {KEY_FILE} fetching {what}. "
+                         "Run app.py to link the key again.")
+    if status != 200:
+        raise SystemExit(f"Zotero answered HTTP {status} fetching {what}.")
+    try:
+        return json.loads(body)
+    except ValueError:
+        raise SystemExit(f"Zotero returned a non-JSON body for {what}.")
+
+
+# ---------------------------------------------------------------- progress
+
+def stdout_never_fails():
+    """Make printing a title that the console cannot encode print '?' instead of crashing.
+
+    On Windows, output redirected to a file or a pipe is encoded with the locale's
+    code page, so an author's name outside it raised UnicodeEncodeError partway
+    through a run. On a UTF-8 terminal - macOS, Linux, the Windows console itself -
+    nothing is ever replaced, so the output is unchanged there.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
+
+
+def no_progress(**event):
+    """The default progress sink: a terminal run reports nothing beyond stdout."""
+
+
+def stderr_progress(**event):
+    """--progress: one JSON object per line on stderr, which app.py reads.
+
+    stderr rather than stdout so the human transcript stays byte-identical with and
+    without the flag - app.py keeps that transcript as the run log. Events are
+    {"p": "stage", "stage", "total"?, "uncached"?} when a stage opens and
+    {"p": "tick", "stage", "done", "net"} per unit of work, where net says whether
+    that unit went to the network rather than the cache - which is what lets the
+    app's time estimate tell a 5s Semantic Scholar call from a cache hit.
+    """
+    print(json.dumps(event), file=sys.stderr, flush=True)
 
 
 # ---------------------------------------------------------------- external APIs
@@ -104,9 +201,17 @@ def _cache_write(path: str, obj) -> None:
     identifier plus ".json".
     """
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
+    with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(obj, fh)
     os.replace(tmp, path)
+
+
+def oa_cache_path(doi):
+    return os.path.join(CACHE_OA, re.sub(r"[^A-Za-z0-9._-]", "_", doi) + ".json")
+
+
+def s2_cache_path(doi):
+    return os.path.join(CACHE_S2, re.sub(r"[^A-Za-z0-9._-]", "_", doi) + ".json")
 
 
 def _zotero_cache_name(path, params):
@@ -137,13 +242,17 @@ class Fetcher:
     the two failure lists. They stay LISTS - keying them by DOI would silently
     dedupe a DOI that fails twice, and the count is part of the build summary.
 
-    The genuinely constant configuration (cache paths, CURL_CONF, MAILTO,
+    The genuinely constant configuration (cache paths, KEY_FILE, MAILTO,
     USER_AGENT) stays at module scope, where it reads as configuration.
     """
 
-    def __init__(self, user_id, no_fetch):
+    def __init__(self, user_id, no_fetch, progress=no_progress):
         self.user_id = user_id
         self.no_fetch = no_fetch
+        self.progress = progress
+        # Outbound reference-list calls made so far. A loop reads it before and after
+        # each item to report whether that item cost a network round trip.
+        self.net_calls = 0
         # Reference-list fetches that failed outright, as (doi, error). Kept so the run
         # can say how much of the graph is missing rather than reporting only what it
         # found: a failed fetch and a paper that genuinely cites nothing are
@@ -155,30 +264,25 @@ class Fetcher:
     # ------------------------------------------------------------ Zotero
 
     @classmethod
-    def connect(cls, no_fetch):
+    def connect(cls, no_fetch, progress=no_progress):
         """Resolve the library's user id, from the recorded copy when offline.
 
         Only the integer id is ever written to disk. The /keys/current response
-        echoes the API key back in plaintext, so it is never cached, never printed,
-        and curl's stderr for it is never shown.
+        echoes the API key back in plaintext, so it is never cached and never
+        printed, not even inside an error.
         """
         cache = os.path.join(CACHE_ZOTERO, "user_id.json")
         if no_fetch:
             hit = _cache_read(cache, "the Zotero user id")
             if hit is None:
                 raise _need_recorded(cache)
-            return cls(hit, no_fetch)
-        user_id = _curl(["-m", "30", "--config", CURL_CONF,
-                         "https://api.zotero.org/keys/current"],
-                        "the API key owner", show_stderr=False)["userID"]
+            return cls(hit, no_fetch, progress)
+        user_id = _zotero_json("keys/current", None, "the API key owner", 30)["userID"]
         _cache_write(cache, user_id)
-        return cls(user_id, no_fetch)
+        return cls(user_id, no_fetch, progress)
 
     def zotero(self, path, **params):
-        url = f"https://api.zotero.org/users/{self.user_id}/{path}"
-        if params:
-            url += "?" + urllib.parse.urlencode(params)
-        return _curl(["-m", "60", "--config", CURL_CONF, url], path)
+        return _zotero_json(f"users/{self.user_id}/{path}", params, path, 60)
 
     def zotero_all(self, path, **params):
         """Every row of a Zotero endpoint, following pagination, and recorded to cache.
@@ -233,18 +337,21 @@ class Fetcher:
         that these will succeed next time. It is that the error text reaches the build
         summary instead of being silently frozen into the cache, where a 404 that means
         "not indexed" and a 429 that means "ask again" look identical."""
-        f = os.path.join(CACHE_OA, re.sub(r"[^A-Za-z0-9._-]", "_", doi) + ".json")
+        f = oa_cache_path(doi)
         hit = _cache_read(f, doi)
         if hit is not None:
             return hit
         if self.no_fetch:
             return {"error": "not cached, --no-fetch"}
+        self.net_calls += 1
         url = "https://api.openalex.org/works/doi:" + urllib.parse.quote(doi, safe="")
         if MAILTO:
             url += "?mailto=" + urllib.parse.quote(MAILTO, safe="")
         try:
             w = _get_json(url)
         except Exception as e:
+            if cert_failure(e):
+                raise SystemExit(CERT_HELP.format(host="api.openalex.org"))
             w = {"error": str(e)[:80]}
         if "error" in w:
             self.oa_failures.append((doi, w["error"]))
@@ -271,13 +378,13 @@ class Fetcher:
         against 5s now. The trailing sleep stays - it paces requests to the roughly one
         per five seconds the unauthenticated endpoint allows, and dropping it would
         guarantee the 429s it is there to avoid."""
-        key = re.sub(r"[^A-Za-z0-9._-]", "_", doi)
-        f = os.path.join(CACHE_S2, key + ".json")
+        f = s2_cache_path(doi)
         hit = _cache_read(f, doi)
         if hit is not None:
             return hit
         if self.no_fetch:
             return {"error": "not cached, --no-fetch"}
+        self.net_calls += 1
         m = re.match(r"10\.48550/arxiv\.(.+)", doi, re.I)
         ident = "ARXIV:" + m.group(1) if m else "DOI:" + doi
         url = ("https://api.semanticscholar.org/graph/v1/paper/"
@@ -288,6 +395,8 @@ class Fetcher:
             if "error" in d or "message" in d:
                 d = {"error": str(d.get("error") or d.get("message"))[:60]}
         except Exception as e:
+            if cert_failure(e):
+                raise SystemExit(CERT_HELP.format(host="api.semanticscholar.org"))
             d = {"error": str(e)[:80]}
         if "error" in d:
             self.s2_failures.append((doi, d["error"]))
@@ -324,14 +433,22 @@ def norm_arxiv(*fields):
 
 
 def pull(fetch):
-    """The library, minus notes, attachments and anything in the trash."""
+    """The library, minus notes, attachments and anything in the trash.
+
+    Also returns the highest item version in the pull. It is the high-water mark the
+    map was built from: app.py asks Zotero for items?since=<it> to count what has
+    changed since, and since it comes from the pull itself it stays right for a
+    --no-fetch build of an older recording. Taken over the raw rows, trash and notes
+    included, because a change to any of them is a change this build has seen.
+    """
+    fetch.progress(p="stage", stage="pull")
     raw = fetch.zotero_all("items", limit=100, itemType="-attachment")
     items = [i["data"] for i in raw
              if i["data"]["itemType"] not in ("note", "attachment")
              and not i["data"].get("deleted")]
     colls = {c["data"]["key"]: c["data"]["name"] for c in fetch.zotero_all("collections", limit=50)}
     print(f"pulled {len(items)} items, {len(colls)} collections")
-    return items, colls
+    return items, colls, max((i.get("version") or 0 for i in raw), default=0)
 
 
 def resolve_identity(fetch, items, colls, AL):
@@ -342,12 +459,19 @@ def resolve_identity(fetch, items, colls, AL):
     the build summary.
     """
     nodes, oa_by_key = {}, {}
+    dois = [d for d in (norm_doi(it.get("DOI")) for it in items) if d]
+    fetch.progress(p="stage", stage="openalex", total=len(dois),
+                   uncached=sum(1 for d in dois if not os.path.exists(oa_cache_path(d))))
+    done = 0
     for it in items:
         k = it["key"]
         doi = norm_doi(it.get("DOI"))
         ids, cited_by, oa_year, err = [], None, None, None
         if doi:
+            before = fetch.net_calls
             w = fetch.openalex_by_doi(doi)
+            done += 1
+            fetch.progress(p="tick", stage="openalex", done=done, net=fetch.net_calls > before)
             if w.get("error"):
                 err = w["error"]
             else:
@@ -393,6 +517,11 @@ def fetch_references(fetch, nodes, oa_by_key):
     """
     refs, doi_refs, arxiv_refs = {}, {}, {}
     fallbacks = 0
+    want = [n["doi"] for k, n in nodes.items()
+            if n["doi"] and not oa_by_key.get(k, {}).get("referenced_works")]
+    fetch.progress(p="stage", stage="s2", total=len(want),
+                   uncached=sum(1 for d in want if not os.path.exists(s2_cache_path(d))))
+    done = 0
     for k, n in nodes.items():
         w = oa_by_key.get(k, {})
         r = w.get("referenced_works") or []
@@ -400,7 +529,10 @@ def fetch_references(fetch, nodes, oa_by_key):
         doi_refs[k] = set()
         arxiv_refs[k] = set()
         if not r and n["doi"]:
+            before = fetch.net_calls
             d = fetch.s2_refs(n["doi"])
+            done += 1
+            fetch.progress(p="tick", stage="s2", done=done, net=fetch.net_calls > before)
             if not d.get("error"):
                 fallbacks += 1
                 for ref in d.get("references") or []:
@@ -461,8 +593,18 @@ def build_edges(nodes, refs, doi_refs, arxiv_refs, AL):
         for a in sorted(x for x in arxiv_refs[k] if x):
             if a in arxiv2key:
                 add(k, arxiv2key[a], "semanticscholar")
+    # aliases.json is per-library data keyed by Zotero item keys, so an edge can name an
+    # item this library does not hold - one since deleted, or a copy of the file from
+    # someone else's checkout. Skipped and counted, never a KeyError further down.
+    foreign = 0
     for src, dst in AL["manual_edges"]["edges"]:
-        add(src, dst, "manual")
+        if src in nodes and dst in nodes:
+            add(src, dst, "manual")
+        else:
+            foreign += 1
+    if foreign:
+        print(f"WARNING: {foreign} manual edge(s) in aliases.json name items not in this "
+              "library - skipped. Remove them if the file came from another library.")
 
     indeg = {k: 0 for k in nodes}
     outdeg = {k: 0 for k in nodes}
@@ -566,10 +708,12 @@ def tag_affinity(nodes, edges):
     return tag_edges, TAG_MIN
 
 
-def emit(nodes, edges, tag_edges, threshold, tag_min):
+def emit(nodes, edges, tag_edges, threshold, tag_min, library_version):
     """Write out/graph.json and summarise the run."""
     graph = {
         "generated": time.strftime("%Y-%m-%d"),
+        # provenance, not a computed value: the pull this graph was built from
+        "library_version": library_version,
         "affinity": list(AFFINITY),
         "tag_edges": tag_edges,
         "tag_min": tag_min,
@@ -582,7 +726,7 @@ def emit(nodes, edges, tag_edges, threshold, tag_min):
         "edges": sorted(edges, key=lambda e: (e["source"], e["target"])),
     }
     p = os.path.join(OUT, "graph.json")
-    with open(p, "w", encoding="utf-8") as fh:
+    with open(p, "w", encoding="utf-8", newline="\n") as fh:   # LF on Windows too
         json.dump(graph, fh, indent=1, sort_keys=True)
     print(f'wrote {p}  |  foundational threshold: '
           f'in-degree >= {threshold["foundational_in_degree"]}')
@@ -595,7 +739,11 @@ def main():
     ap.add_argument("--no-fetch", action="store_true",
                     help="work from the recorded library and cached API responses "
                          "only; make no network calls")
+    ap.add_argument("--progress", action="store_true",
+                    help="also write JSON progress lines to stderr, for app.py")
     args = ap.parse_args()
+    stdout_never_fails()
+    progress = stderr_progress if args.progress else no_progress
 
     for d in (CACHE_OA, CACHE_S2, CACHE_ZOTERO, OUT):
         os.makedirs(d, exist_ok=True)
@@ -603,21 +751,29 @@ def main():
     if not MAILTO and not args.no_fetch:
         print("WARNING: ZOTERO_MAP_MAILTO unset - OpenAlex and Semantic Scholar calls go "
               "to the common pool, which is slower and rate-limited more aggressively.")
-        print("   export ZOTERO_MAP_MAILTO=you@example.com   to join the polite pool")
+        # in the shell syntax of the platform the run is on; app.py's setup page
+        # takes the address too, and passes it on
+        if sys.platform == "win32":
+            print('   $env:ZOTERO_MAP_MAILTO = "you@example.com"   (PowerShell) to join '
+                  "the polite pool")
+        else:
+            print("   export ZOTERO_MAP_MAILTO=you@example.com   to join the polite pool")
 
-    fetch = Fetcher.connect(args.no_fetch)
+    progress(p="stage", stage="connect")
+    fetch = Fetcher.connect(args.no_fetch, progress)
 
     with open(os.path.join(HERE, "aliases.json"), encoding="utf-8") as fh:
         AL = json.load(fh)
 
-    items, colls = pull(fetch)
+    items, colls, library_version = pull(fetch)
     nodes, oa_by_key = resolve_identity(fetch, items, colls, AL)
     refs, doi_refs, arxiv_refs, fallbacks, missing = fetch_references(fetch, nodes, oa_by_key)
     report_fetch(fetch, refs, fallbacks, missing)
+    progress(p="stage", stage="edges")
     edges, indeg, outdeg = build_edges(nodes, refs, doi_refs, arxiv_refs, AL)
     threshold = classify(nodes, indeg, outdeg)
     tag_edges, tag_min = tag_affinity(nodes, edges)
-    emit(nodes, edges, tag_edges, threshold, tag_min)
+    emit(nodes, edges, tag_edges, threshold, tag_min, library_version)
 
 
 if __name__ == "__main__":

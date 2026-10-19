@@ -1,0 +1,80 @@
+/* The app strip: the one row app.py adds to the map, plus the setup page. Everything
+   here reads the tokens map.css defines on :root, so it cannot drift from the map. */
+/* Above .bar: the row keeps its top border, and the bar's own top border closes it. */
+.appstrip{display:flex;align-items:center;gap:0;border:1px solid var(--line);border-bottom:0;
+  flex-wrap:wrap;min-height:33px;font-size:11.5px;letter-spacing:.06em;color:var(--dimmer)}
+.appstrip>.it{padding:7px 12px;border-right:1px solid var(--line);white-space:nowrap}
+.appstrip .grow{flex:1;min-width:0;border-right:0;overflow:hidden;text-overflow:ellipsis}
+.appstrip .bc{border-left:1px solid var(--line);border-right:0;text-decoration:none}
+.appstrip .bc.hot{color:var(--bg);background:var(--accent)}
+.appstrip .bc.hot:hover{background:var(--cursor);color:var(--bg)}
+.appstrip .bc:disabled{opacity:.45;cursor:default}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:8px;vertical-align:1px;
+  background:var(--dimmer)}
+.dot.on{background:var(--found);box-shadow:0 0 0 3px color-mix(in srgb,var(--found) 22%,transparent)}
+.appstrip .n{color:var(--fg);font-weight:500}
+.appstrip .ok{color:var(--found)}
+.appstrip .err{color:var(--contra)}
+.lnk{appearance:none;background:none;border:0;padding:0;margin-left:8px;font:inherit;letter-spacing:inherit;
+  color:var(--dimmer);cursor:pointer;text-decoration:none;text-transform:lowercase}
+.lnk:hover{color:var(--accent)}
+.lnk:focus-visible{outline:1px solid var(--accent);outline-offset:2px}
+
+/* progress: a fixed-width readout either side of a flexible bar, so nothing jumps */
+.pbar{flex:1;min-width:80px;height:7px;margin:0 12px;background:var(--line);position:relative;overflow:hidden}
+.pbar>i{position:absolute;inset:0 auto 0 0;background:var(--accent);transition:width .45s linear}
+.pbar.ind>i{width:30%!important;animation:slide 1.2s ease-in-out infinite alternate}
+@keyframes slide{from{left:-10%}to{left:80%}}
+@media (prefers-reduced-motion:reduce){.pbar>i{transition:none}.pbar.ind>i{animation:none;left:0}}
+.appstrip .stg{flex:0 0 auto;color:var(--dim)}
+.appstrip .cnt,.appstrip .eta{font-variant-numeric:tabular-nums}
+.appstrip .eta{flex:0 0 132px;text-align:right}
+
+.appdrop{border:1px solid var(--line);border-top:0;border-bottom:0;background:var(--panel);
+  padding:9px 13px 11px;font-size:11.5px;color:var(--dimmer);max-height:240px;overflow:auto}
+.appdrop h4{font-size:10px;letter-spacing:.13em;color:var(--accent);margin:6px 0 4px;font-weight:500;
+  text-transform:uppercase}
+.appdrop h4:first-child{margin-top:0}
+.appdrop ul{list-style:none;margin:0;padding:0}
+.appdrop li:before{content:"› ";color:var(--line)}
+.appdrop pre{margin:0;white-space:pre-wrap;font:inherit;font-size:11px;color:var(--dim);line-height:1.55}
+.appdrop .note{margin-top:7px;font-size:10.5px}
+
+/* ---------------------------------------------------------------- setup page */
+.steps{border:1px solid var(--line);border-top:0}
+.step{display:grid;grid-template-columns:44px 1fr;gap:13px;padding:15px 13px 16px;border-bottom:1px solid var(--line)}
+.step:last-child{border-bottom:0}
+.step .no{color:var(--accent);font-weight:700;font-size:12px;letter-spacing:.1em;padding-top:1px}
+.step h2{font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--fg);margin:0 0 7px;font-weight:700}
+.step p,.step li{color:var(--dim);font-size:12.5px;margin:0 0 7px;max-width:84ch}
+.step ol,.step ul{margin:0 0 7px;padding-left:18px}
+.step .dim{color:var(--dimmer);font-size:11.5px}
+.step a{color:var(--accent)}
+.step a:hover{color:var(--fg)}
+.step kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);padding:0 5px;color:var(--fg)}
+.step.off{opacity:.42}
+.step.off .act{pointer-events:none}
+.fld{display:grid;grid-template-columns:110px 1fr;align-items:center;border:1px solid var(--line);margin:9px 0 0;max-width:620px}
+.fld+.fld{border-top:0;margin-top:0}
+.fld label{color:var(--dimmer);font-size:11px;letter-spacing:.08em;text-transform:uppercase;padding:0 12px;
+  border-right:1px solid var(--line);align-self:stretch;display:flex;align-items:center}
+.fld input{appearance:none;background:transparent;border:0;color:var(--fg);font-family:var(--mono);
+  font-size:12.5px;letter-spacing:.04em;padding:9px 12px;outline:none;min-width:0}
+.fld input::placeholder{color:var(--dimmer)}
+.fld:focus-within{border-color:var(--accent)}
+.act{appearance:none;font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;
+  background:var(--accent);color:var(--bg);border:1px solid var(--accent);padding:8px 16px;cursor:pointer;
+  margin-top:12px;font-weight:700}
+.act:hover{background:var(--cursor);border-color:var(--cursor)}
+.act:disabled{opacity:.5;cursor:default}
+.act:focus-visible{outline:1px solid var(--cursor);outline-offset:2px}
+.act.sec{background:transparent;color:var(--dim);border-color:var(--line);font-weight:500}
+.act.sec:hover{color:var(--accent);border-color:var(--accent)}
+.msg{font-size:12px;margin-top:10px;min-height:1em}
+.msg.ok{color:var(--found)}
+.msg.err{color:var(--contra)}
+.setupbuild{margin-top:12px}
+.setupbuild .appstrip{border:1px solid var(--line)}
+.setupbuild .appdrop{border-bottom:1px solid var(--line)}
+@media(max-width:640px){.fld{grid-template-columns:1fr}.fld label{border-right:0;border-bottom:1px solid var(--line);padding:6px 12px}
+.appstrip .eta{flex-basis:auto}.step{grid-template-columns:1fr;gap:4px}}

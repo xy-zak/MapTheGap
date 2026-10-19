@@ -47,6 +47,11 @@ worth carrying between libraries:
 > `formal model` · `benchmark / experiments` · `quasi-experimental` ·
 > `network analysis` · `dataset / product` · `popular / secondary`
 
+That is a starting set, not a fixed list. It leans towards empirical research; a
+humanities or theory-heavy library may need values like `close reading`, `archival` or
+`interpretive`, and can drop the ones nothing in it uses. Change it deliberately, once,
+and record the change in the vocabulary note.
+
 `subject:`, `question:` and `approach:` are the opposite: they are specific to a
 literature, and a vocabulary built for one field means nothing in another. Build them
 from the items in front of you, not from a template.
@@ -65,11 +70,12 @@ from the items in front of you, not from a template.
 ## Read the recorded vocabulary first
 
 **references/vocabulary.md** is generated from the live library by `vocab.py` and is the
-authority on what exists right now: every facet value, its holder count, which values
+authority on what exists right now. It is per-library and gitignored, so on a fresh
+clone it does not exist yet: run `vocab.py` before anything else: every facet value, its holder count, which values
 carry a gloss, and how close each facet is to its limit.
 
 ```bash
-python3 vocab.py              # refresh from the library
+python3 vocab.py              # refresh from the library  (Windows: py vocab.py)
 python3 vocab.py --no-fetch    # from the recorded pull, offline
 ```
 
@@ -91,7 +97,8 @@ recompute them.
 OpenAlex, then Semantic Scholar; coverage is patchy and differs between them. Where the
 library holds the PDF, read it —
 `~/Zotero/storage/<attachmentKey>/.zotero-ft-cache` is the extracted plain text, far
-cheaper than parsing. When no abstract exists anywhere, tag from title and venue and
+cheaper than parsing (`~/Zotero` is the default data directory; Zotero's *Settings →
+Advanced → Files and Folders* shows the real one). When no abstract exists anywhere, tag from title and venue and
 **say which items those were**, in your report and in the note's provenance. Name the
 single least certain call you made. Never quietly infer content.
 
@@ -202,13 +209,15 @@ A merge rewrites tags across many items, so:
 Merging is not cosmetic. If the library feeds the citation map:
 
 - **Vocabulary edges change.** Two values become one shared tag, so pairs that shared
-  nothing may now share a term and gain an edge, and the inverse-frequency weighting
-  shifts for every pair touching it — a merged term is commoner, so it says less.
+  nothing may now share a term and cross the overlap threshold, gaining an edge — and
+  every vocabulary edge pulls equally, so each one gained moves the layout and can
+  move the communities.
 - **Band membership changes.** Each source sits in the band of its **rarest** value in
   the banding facet, so merging two rare values into one commoner one can move items
   into a different band entirely — including items that carried neither.
 - **A band disappears.** One fewer value in a banding facet is one fewer swimlane.
-- **Cluster labels may change**, since labels are picked by distinctiveness.
+- **Cluster labels may change**, since labels are picked by distinctiveness and a
+  merged term is commoner, so it scores as less distinctive.
 
 Rebuild the map after a merge and report the diff, rather than letting the next rebuild
 surprise someone.

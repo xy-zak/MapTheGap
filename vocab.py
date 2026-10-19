@@ -103,6 +103,7 @@ def main():
     ap.add_argument("--no-fetch", action="store_true",
                     help="use the recorded library pull under cache/zotero/; no network")
     args = ap.parse_args()
+    build.stdout_never_fails()
 
     os.makedirs(build.CACHE_ZOTERO, exist_ok=True)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
@@ -271,7 +272,7 @@ def main():
     w("")
 
     text = "\n".join(L)
-    with open(OUT, "w", encoding="utf-8") as fh:
+    with open(OUT, "w", encoding="utf-8", newline="\n") as fh:   # LF on Windows too
         fh.write(text)
     rel = os.path.relpath(OUT, HERE)
     print("wrote %s - %d items, %d facets"

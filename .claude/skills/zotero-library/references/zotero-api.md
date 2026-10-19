@@ -72,7 +72,7 @@ Common payloads:
 
 ```json
 {"tags": [{"tag": "a"}, {"tag": "b"}]}    // replaces the whole tag set
-{"collections": ["RBVB4KWL"]}              // replaces collection membership
+{"collections": ["<collKey>"]}             // replaces collection membership
 {"deleted": 1}                             // move to trash (reversible)
 {"parentItem": "<itemKey>"}                // re-parent an attachment
 {"note": "<h1>...</h1>"}                   // note body, HTML
@@ -141,9 +141,14 @@ one current, one stale — which reads as correct until someone checks the numbe
 ## Local reads
 
 ```bash
-cp ~/Zotero/zotero.sqlite /tmp/scratch/z.sqlite   # never query the live file
-sqlite3 /tmp/scratch/z.sqlite "..."
+cp ~/Zotero/zotero.sqlite <scratch>/z.sqlite      # never query the live file
+python3 -c "import sqlite3; print(sqlite3.connect('<scratch>/z.sqlite').execute('...').fetchall())"
 ```
+
+`~/Zotero` is the default data directory on macOS, Windows and Linux alike (Zotero's
+*Settings → Advanced → Files and Folders* shows the real one). Query the copy through
+Python's built-in `sqlite3` module; the `sqlite3` command-line tool is not installed on
+Windows.
 
 Useful tables: `items`, `itemData`/`itemDataValues`/`fields`, `itemCreators`/`creators`,
 `collections`/`collectionItems`, `itemAttachments`, `itemNotes`, `itemTags`/`tags`,

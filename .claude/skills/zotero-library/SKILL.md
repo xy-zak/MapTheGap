@@ -31,8 +31,9 @@ All writes go through the Web API. See references/zotero-api.md.
 
 ### Locate the key
 
-The API key lives in a curl config file, by convention `~/.config/zotero-api.conf`,
-containing one line:
+The API key lives in a curl config file, by convention `~/.config/zotero-api.conf`
+(on Windows, `%USERPROFILE%\.config\zotero-api.conf`, which is the same `~` in Git
+Bash), containing one line:
 
 ```
 header = "Zotero-API-Key: <key>"
@@ -41,10 +42,18 @@ header = "Zotero-API-Key: <key>"
 Use it as `curl --config ~/.config/zotero-api.conf`. A config file rather than `-H`
 keeps the key out of `ps` output and out of the conversation transcript.
 
-If the file is absent, ask the person to create it in *their own* terminal — not
-through you, and not with the `!` prefix, either of which puts the key in the
-transcript. They generate one at zotero.org/settings/keys with **write access to the
-personal library**.
+curl ships with macOS, Linux and Windows 10 and later, so these recipes work on all
+three from a Bash shell, which is what Claude Code uses on Windows (Git Bash). In
+Windows PowerShell, `curl` is an alias for `Invoke-WebRequest`; call `curl.exe`
+explicitly there. Likewise `python3` is often `py` or `python` on Windows.
+
+If the file is absent, ask the person to link a key through MapTheGap's setup page
+(`python3 app.py`) or to create the file in *their own* terminal — not through you,
+and not with the `!` prefix, either of which puts the key in the transcript. They
+generate one at zotero.org/settings/keys with **write access to the personal
+library**. The map alone only needs read access, so a key made for it may lack
+write access; a 403 on a write means exactly that, and the fix is to edit the key at
+zotero.org, not to retry.
 
 Get the numeric user ID from `/keys/current`, but **filter the response** — it echoes
 the key back in plaintext:

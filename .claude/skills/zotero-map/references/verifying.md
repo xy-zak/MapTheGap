@@ -8,9 +8,13 @@ success.
 **Two consecutive runs must produce byte-identical `graph.json`.**
 
 ```bash
-python3 build.py --no-fetch && sha256sum out/graph.json
-python3 build.py --no-fetch && sha256sum out/graph.json
+python3 build.py --no-fetch && python3 -c "import hashlib; print(hashlib.sha256(open('out/graph.json','rb').read()).hexdigest())"
+python3 build.py --no-fetch && python3 -c "import hashlib; print(hashlib.sha256(open('out/graph.json','rb').read()).hexdigest())"
 ```
+
+Hashed in Python rather than with `sha256sum`, which macOS does not ship. Every output
+file is written with LF line endings on every platform, so a Windows build hashes the
+same as a Linux one.
 
 This has caught a real bug: iterating Python sets gave unstable edge ordering under
 hash randomisation. Sort before iterating, and sort the final edge list.

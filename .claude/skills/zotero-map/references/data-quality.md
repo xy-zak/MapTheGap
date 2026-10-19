@@ -25,7 +25,9 @@ Three failure modes, all of which occur in practice:
 
 ### aliases.json
 
-The only hand-maintained data in the repo. Four sections, each carrying a `_comment`:
+The only hand-maintained data in the repo, and specific to one library: everything in
+it is keyed by Zotero item keys or names that library's records. A new library starts
+with all four sections empty. Four sections, each carrying a `_comment`:
 
 | key | holds |
 |---|---|

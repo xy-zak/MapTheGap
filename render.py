@@ -11,6 +11,7 @@ import json
 import math
 import os
 import re
+import sys
 
 import force   # the clustering layout lives there; see its module docstring
 
@@ -173,6 +174,11 @@ def build_bands(nodes, field):
 
 
 def main():
+    # print '?' rather than crash where Windows encodes redirected output with a code
+    # page that lacks a character - see build.stdout_never_fails for the full story
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
     with open(os.path.join(HERE, "out", "graph.json"), encoding="utf-8") as fh:
         G = json.load(fh)
     nodes = {n["key"]: n for n in G["nodes"]}
@@ -226,7 +232,7 @@ def main():
         "DATA": json.dumps(payload, separators=(",", ":")).replace("</", "<\\/"),
     })
     p = os.path.join(HERE, "out", "map.html")
-    with open(p, "w", encoding="utf-8") as fh:
+    with open(p, "w", encoding="utf-8", newline="\n") as fh:   # LF on Windows too
         fh.write(out)
     print(f'wrote {p} ({len(out) / 1024:.0f} KB) — {len(payload["nodes"])} nodes, '
           f'{len(payload["edges"])} edges, canvas {W}x{H}')

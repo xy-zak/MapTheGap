@@ -7,9 +7,47 @@ in that graph.
 
 The output is a single self-contained HTML page with two views of the same data.
 
+## Quick start
+
+Double-click the launcher for your system, in the repo folder:
+
+| | double-click | the first time |
+|---|---|---|
+| macOS | `MapTheGap_Mac.command` | If macOS says it can't verify the file, open *System Settings → Privacy & Security*, scroll down and press **Open Anyway**. |
+| Windows | `MapTheGap_Windows.bat` | If Windows asks whether to run it, choose **Run** (or *More info → Run anyway*). |
+| Linux | `MapTheGap_Linux.sh` | Choose **Run** when the file manager asks; in GNOME Files, right-click → **Run as a Program**. |
+
+The only thing it needs is Python 3.9 or newer (see [Requirements](#requirements)).
+If none is installed, the launcher says so and, on macOS and Windows, opens the
+python.org download page.
+
+A terminal window opens alongside the browser tab. That window is the app: leave it
+open while you use the map, and close it to stop, or press **quit** on the page.
+Double-clicking the launcher again while the app is running just reopens the tab.
+From a terminal, the same thing is `python3 app.py` (Windows: `py app.py`).
+
+The app runs at `http://127.0.0.1:8765`, or the next free port if something else
+holds that one. The first visit is a setup page that
+walks through syncing Zotero, creating a read-only API key and linking it, then builds
+the first map. After that the page is the map itself, with one extra strip above the
+title: whether Zotero is open, how many items have changed since the map was built
+(new, edited, removed, with titles behind `[show]`), and an **update map** button that
+shows each stage, a progress bar and the time left.
+
+The change count comes from the Zotero Web API, so an edit counts once Zotero has
+synced it. The time estimate is learned: each finished update records how long every
+stage took on this machine in `cache/app/timings.json`, and the next one starts from
+that.
+
+The app is a thin layer over the same scripts. Everything below still works from a
+terminal, and `out/map.html` is still a standalone page. `app.py --port N` pins the
+port, and `--no-browser` skips opening a tab.
+
 ## Pipeline
 
 ```
+MapTheGap_*   double-click launchers: _Mac.command, _Windows.bat, _Linux.sh
+app.py        the local app: setup, the map, change tracking, update with progress
 build.py      pull → resolve identity → fetch references → build edges → classify → out/graph.json
 render.py     out/graph.json → out/map.html   (both view modes, one page)
 vocab.py      the library's live tag vocabulary → the zotero-tag skill's reference
@@ -42,27 +80,45 @@ including the current selection.
 
 ## Requirements
 
-- **Python 3** — standard library only. No `pip install`, no virtualenv.
-- **curl** — `build.py` shells out to it for the Zotero calls.
-- **`ZOTERO_MAP_MAILTO`** *(optional, recommended)* — a contact address for the
-  OpenAlex / Semantic Scholar **polite pool**, which is faster and throttled less
-  aggressively than the common pool. Unset is supported: the address is simply
-  omitted from the User-Agent and the OpenAlex query, and `build.py` prints a
-  warning once per run. No address is hardcoded anywhere in this repo.
-
-  ```bash
-  export ZOTERO_MAP_MAILTO=you@example.com
-  ```
-
-- **A Zotero Web API key** at `~/.config/zotero-api.conf`, as a curl config file:
+- **Python 3.9 or newer**, standard library only. No `pip install`, no virtualenv,
+  nothing else to install.
+  - *macOS:* use Python from [python.org](https://www.python.org/downloads/) or
+    Homebrew (`brew install python`). The python.org installer leaves HTTPS
+    certificates unconfigured until you run **Install Certificates.command** in
+    *Applications → Python 3.x*. Do that once, or every call fails, and the build
+    will tell you so.
+  - *Windows:* install from [python.org](https://www.python.org/downloads/) and keep
+    *py launcher* ticked; the commands here are then `py …` where macOS and Linux
+    say `python3 …`. Python from the Microsoft Store also works, as `python …`.
+  - *Linux:* the distribution's `python3` package.
+- **A Zotero Web API key**, linked through the app's setup page. It is stored in
+  your home folder rather than the repo, at `~/.config/zotero-api.conf` on macOS
+  and Linux and `%USERPROFILE%\.config\zotero-api.conf` on Windows. To write it by
+  hand instead, the file is one line, in curl's config format so that curl can
+  use it too:
 
   ```
   header = "Zotero-API-Key: <your-key>"
   ```
 
-  Keep it at mode `600` and **outside this repo**. Nothing here reads
-  `zotero.sqlite` — the library is reached over the Web API, so your local Zotero
-  install and its database are never touched.
+  On macOS and Linux keep it at mode `600`; on Windows your profile folder is
+  already private to your account. **Never put it inside this repo.** Nothing here
+  reads `zotero.sqlite`. The library is reached over the Web API, so your local
+  Zotero install and its database are never touched.
+- **A contact address** *(optional, recommended)* for the OpenAlex / Semantic
+  Scholar **polite pool**, which is faster and throttled less aggressively than the
+  common pool. Enter it on the setup page, or for terminal runs set
+  `ZOTERO_MAP_MAILTO`:
+
+  | | |
+  |---|---|
+  | macOS, Linux | `export ZOTERO_MAP_MAILTO=you@example.com` |
+  | Windows (PowerShell) | `$env:ZOTERO_MAP_MAILTO = "you@example.com"` |
+  | Windows (cmd) | `set ZOTERO_MAP_MAILTO=you@example.com` |
+
+  Unset is supported: the address is simply omitted from the User-Agent and the
+  OpenAlex query, and `build.py` prints a warning once per run. No address is
+  hardcoded anywhere in this repo.
 
 Data sources for reference lists: [OpenAlex](https://openalex.org) and
 [Semantic Scholar](https://www.semanticscholar.org). Responses are cached per DOI
@@ -96,18 +152,26 @@ candidates proposed for anything over budget. It is generated, gitignored and
 regenerable, so it cannot drift from the library:
 
 ```bash
-python3 vocab.py             # refresh from the library
+python3 vocab.py             # refresh from the library  (Windows: py vocab.py)
 python3 vocab.py --no-fetch  # from the recorded pull, offline
 ```
 
-## Usage
+## Usage from a terminal
+
+From the repo folder, on macOS or Linux:
 
 ```bash
-cd ~/Work/GitHub/MapTheGap
-export ZOTERO_MAP_MAILTO=you@example.com   # optional; joins the API polite pool
 python3 build.py          # add --no-fetch to work from cache only, no network
 python3 render.py
-xdg-open out/map.html
+open out/map.html         # macOS;  xdg-open out/map.html  on Linux
+```
+
+On Windows, in PowerShell or cmd:
+
+```bat
+py build.py
+py render.py
+start out\map.html
 ```
 
 `out/` and `cache/` are gitignored — both are regenerable from the two commands above.
@@ -118,8 +182,10 @@ There are **no arrowheads**. Direction is carried by colour on selection — red
 what the source cites, green for what cites it — and an arrowhead on top of that
 was redundant ink.
 
-The clustering layout weights shared vocabulary by *inverse frequency*, not Jaccard:
-a shared `subject: cross-cutting` (47 of 94 items) says nearly nothing, while a
-shared `question: data governance` (4 of 94) says a great deal, and Jaccard scores
-them the same. See the module docstring in `force.py` for the three decisions that
-carry that design and the measurements behind each.
+In the clustering layout every shared-vocabulary link pulls with the same strength,
+half that of a citation, whichever tags the two sources share. Weighting rare shared
+tags above common ones was tried and measured; it said something finer but spread the
+weights five to one, and the flat weight leaves the layout making one plain claim: a
+shared vocabulary is half the evidence of a citation. See the module docstring in
+`force.py` for the three decisions that carry the design and the measurements behind
+each.

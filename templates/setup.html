@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MapTheGap Setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="/app/map.css">
+<link rel="stylesheet" href="/app/app.css">
+</head>
+<body data-page="setup">
+<div class="wrap">
+<div class="bar"><span class="t">ZOTERO :: CITATION MAP :: SETUP</span>
+  <span><a class="m" id="tomap" href="/" hidden>[← back to the map]</a>
+  <button class="lnk m" id="quit" type="button" title="stop the app">[quit]</button></span></div>
+<div class="steps">
+
+  <section class="step" id="s-linked" hidden>
+    <span class="no">✓</span>
+    <div>
+      <h2>Zotero is linked</h2>
+      <p>Linked as <b id="who"></b>. The key is stored in <code id="conf"></code>, readable only by you.</p>
+      <p class="dim">To use a different key or account, fill in the steps below again. Leave the key empty to change only the contact address.</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <span class="no">01</span>
+    <div>
+      <h2>Sync Zotero to zotero.org</h2>
+      <p>The map reads your library from zotero.org rather than from the desktop app, so the desktop library has to sync there.</p>
+      <ol>
+        <li>No account yet? <a href="https://www.zotero.org/user/register" target="_blank" rel="noopener">Create a free one</a>.</li>
+        <li>In Zotero, open <kbd>Edit → Settings → Sync</kbd> (on macOS, <kbd>Zotero → Settings → Sync</kbd>), sign in, and leave <i>Sync automatically</i> on.</li>
+        <li>Wait for the first sync to finish (the green arrow at the top right stops spinning).</li>
+      </ol>
+      <p class="dim">File sync and attachments don't matter here. Only item data is read.</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <span class="no">02</span>
+    <div>
+      <h2>Create an API key</h2>
+      <ol>
+        <li>Open <a href="https://www.zotero.org/settings/keys/new" target="_blank" rel="noopener">zotero.org/settings/keys/new</a> and sign in.</li>
+        <li>Name it something like <i>MapTheGap</i>.</li>
+        <li>Under <i>Personal Library</i>, tick <b>Allow library access</b>. The map only reads, so <i>Allow write access</i> can stay unticked. Tick it only if you also use the Claude Code skills in this repo to file and tag papers, because those write to the library.</li>
+        <li>Press <i>Save Key</i> and copy the key it shows: 24 letters and digits. Zotero shows it only once.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="step">
+    <span class="no">03</span>
+    <div>
+      <h2>Link your Zotero database</h2>
+      <form id="f" autocomplete="off">
+        <div class="fld"><label for="key">api key</label>
+          <input id="key" name="key" type="password" spellcheck="false" placeholder="paste the key from step 02"></div>
+        <div class="fld"><label for="mailto">contact</label>
+          <input id="mailto" name="mailto" type="email" spellcheck="false" placeholder="you@example.com (optional)"></div>
+        <p class="dim" style="margin-top:8px">The contact address is optional. OpenAlex and Semantic Scholar, the two services that supply reference lists, answer requests that include one faster and limit them less. It is sent only to those two services.</p>
+        <button class="act" id="link" type="submit">link zotero database</button>
+        <div class="msg" id="msg" role="status"></div>
+      </form>
+    </div>
+  </section>
+
+  <section class="step off" id="s-build">
+    <span class="no">04</span>
+    <div>
+      <h2>Build the map</h2>
+      <p id="buildp">Pulls the library, looks up every source's reference list, and draws the map. The first build is the slow one: Semantic Scholar allows about one request every five seconds, and everything it returns is cached, so later builds take seconds.</p>
+      <button class="act" id="build" type="button">build the map</button>
+      <div class="setupbuild" id="buildhost"></div>
+    </div>
+  </section>
+
+</div>
+</div>
+<script src="/app/app.js"></script>
+<script>
+(function(){
+const {Strip,api}=window.MTG;
+const $=id=>document.getElementById(id);
+let strip=null;
+
+function enableBuild(label){
+  $('s-build').classList.remove('off');
+  if(label)$('build').textContent=label;
+}
+function show(s){
+  if(s.linked){
+    $('s-linked').hidden=false;
+    $('who').textContent=s.username?(s.username+' (user '+s.user_id+')'):'an existing key';
+    $('conf').textContent=s.conf;
+    $('key').placeholder='leave empty to keep the current key';
+    $('link').textContent=s.has_map?'save':'link zotero database';
+    enableBuild(s.has_map?'rebuild the map':'build the map');
+  }
+  if(s.mailto)$('mailto').value=s.mailto;
+  $('tomap').hidden=!(s.linked&&s.has_map&&s.map_matches);
+}
+api('/api/setup').then(show);
+
+$('f').addEventListener('submit',e=>{
+  e.preventDefault();
+  const m=$('msg');m.className='msg';m.textContent='checking the key with zotero.org…';
+  $('link').disabled=true;
+  api('/api/setup',{key:$('key').value,mailto:$('mailto').value}).then(r=>{
+    $('key').value='';
+    m.className='msg ok';
+    m.textContent='✓ linked as '+r.username+(r.items!=null?' · '+r.items+' top-level items in the library':'');
+    api('/api/setup').then(show);
+    enableBuild(r.has_map&&r.map_matches?'rebuild the map':'build the map');
+    if(!(r.has_map&&r.map_matches))$('s-build').scrollIntoView({behavior:'smooth',block:'nearest'});
+  }).catch(err=>{m.className='msg err';m.textContent='✗ '+err.message;})
+    .finally(()=>{$('link').disabled=false;});
+});
+
+$('quit').addEventListener('click',()=>{
+  window.MTG.quit().then(()=>{
+    document.querySelector('.steps').innerHTML='<section class="step"><span class="no">■</span><div>'+
+      '<h2>MapTheGap has stopped</h2><p>Start it again from its launcher whenever you want it back.</p></div></section>';
+    $('quit').hidden=true;$('tomap').hidden=true;
+  });
+});
+
+$('build').addEventListener('click',()=>{
+  $('build').hidden=true;
+  if(!strip)strip=Strip($('buildhost'),'setup',()=>{location.href='/';});
+  strip.start();
+});
+})();
+</script>
+</body>
+</html>

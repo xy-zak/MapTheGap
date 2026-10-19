@@ -1,0 +1,6 @@
+# The launchers have to carry their own platform's line endings whatever the
+# checkout's settings: cmd misreads labels in a .bat with LF endings, and a shell
+# script with CRLF endings fails on its first line.
+*.bat      text eol=crlf
+*.command  text eol=lf
+*.sh       text eol=lf

@@ -18,6 +18,7 @@ This skill ships with the MapTheGap repo and describes the tooling in it. Paths 
 are relative to the repo root.
 
 ```
+app.py        the local app (setup page, map, change count, update button) over the two below
 build.py      pull → resolve identity → fetch references → build edges → classify → out/graph.json
 render.py     out/graph.json → out/map.html   (both view modes, one page)
 force.py      the clustering layout — imported by render.py, not run directly
@@ -29,22 +30,62 @@ out/          generated; both files are disposable and gitignored
 
 ## Setup
 
-Needed once, before the first run:
+Needed once, before the first run. Everything here works the same on macOS, Windows
+and Linux.
 
-- **Python 3 and curl.** Standard library only — no pip, no virtualenv.
-- **A Zotero Web API key** at `~/.config/zotero-api.conf`, as a curl config file
-  holding one line: `header = "Zotero-API-Key: <key>"`. Keep it mode `600` and
-  outside the repo. If it is missing, ask the person to create it in *their own*
-  terminal — not through you and not with the `!` prefix, either of which puts the
+- **Python 3.9 or newer.** Standard library only — no pip, no virtualenv, no curl.
+  On Windows the interpreter is usually `py` (or `python`) where this skill says
+  `python3`; check which one answers before running anything.
+- **A Zotero Web API key** at `~/.config/zotero-api.conf` (`%USERPROFILE%\.config\`
+  on Windows), as a curl config file holding one line:
+  `header = "Zotero-API-Key: <key>"`. Outside the repo, and mode `600` on macOS and
+  Linux. If it is missing, ask the person to run `python3 app.py` (Windows:
+  `py app.py`) and link it on the setup page, or to create the file in *their own*
+  terminal — never through you and not with the `!` prefix, either of which puts the
   key in the transcript.
-- **`ZOTERO_MAP_MAILTO`** (optional, recommended) — a contact address that joins the
-  OpenAlex and Semantic Scholar *polite pool*, which is faster and throttled less.
-  Unset is supported; `build.py` warns once and uses the common pool.
+- **A contact address** (optional, recommended) that joins the OpenAlex and Semantic
+  Scholar *polite pool*, which is faster and throttled less. Set on the app's setup
+  page, or as `ZOTERO_MAP_MAILTO` for terminal runs. Unset is supported; `build.py`
+  warns once and uses the common pool.
+- **macOS with python.org Python:** if a build stops saying Python could not verify
+  an HTTPS certificate, the person needs to run *Install Certificates.command* in
+  *Applications → Python 3.x* once. It is not a network problem; retrying won't help.
 
 Nothing reads `zotero.sqlite`. The library is reached over the Web API, so the local
 Zotero install is never touched.
 
+## Pointing it at a different library
+
+The tooling makes no assumption about what a library is *about*: the roles come from
+the citation graph, the threshold is a percentile of that library's own in-degree, and
+the bands and cluster names come from whatever tag values it carries. A few things in
+the repo were nonetheless set for the library it was developed against, and need
+checking the first time it is used on another:
+
+- **`aliases.json` is per-library data.** It is keyed by Zotero item keys, which only
+  mean something in the library they came from. Starting on a new library, empty the
+  four sections (keep the `_comment` keys) and build up its own fixes. Entries naming
+  items the library does not hold are skipped with a warning, never applied.
+- **The year range is fixed at 1960-2030.** Older sources are clamped to the left edge.
+  For a library of older work, change the range in `render.py` and the colour bins in
+  `force.py` together - see "Timeline" and "Colour by year" in references/views.md.
+- **The tag vocabulary is the library's own.** Only the three facet *prefixes* are fixed
+  (see below); every value under them is built from that library's items with the
+  `zotero-tag` skill. An untagged library still maps, as one band with no vocabulary
+  links.
+- **Personal libraries only.** `build.py` reads `users/<id>`; a Zotero group library
+  (`groups/<id>`) is not supported.
+- **The numbers in references/views.md** describe the development library. Expect
+  different ones; re-measure rather than tune towards them.
+
 ## The routine
+
+For a person, double-clicking `MapTheGap_Mac.command` (macOS), `MapTheGap_Windows.bat` (Windows)
+or `MapTheGap_Linux.sh` (Linux) is the whole routine. Each one finds Python and runs
+`app.py`, which links the key, shows how many
+items changed since the map was built, and rebuilds on a button. It runs exactly the
+two commands below (`build.py --progress` writes JSON progress to stderr for it, and
+leaves stdout unchanged). From Claude Code, run them directly:
 
 ```bash
 python3 build.py        # add --no-fetch to make no network calls at all
@@ -138,10 +179,13 @@ references/views.md.
   collapses the graph into a single component, so a group joined only by faint dashes
   shares language and cites nothing. That contrast is the only thing stopping the view
   from asserting an intellectual link for which there is no citation evidence.
-- **Vocabulary springs are inverse-frequency, not the stored Jaccard.** Jaccard values
-  in `graph.json` all sit in [0.5, 1.0] — as a spring constant that is no spread — and
-  a shared near-universal tag counts the same as a shared rare one. Summing
-  `log(N/freq)` over the shared tags instead gives a defensible range.
+- **Every vocabulary link pulls the same: `VOC_STR`, half a citation.** Not the stored
+  Jaccard, whose values all sit in [0.5, 1.0] and so give the springs no spread, and no
+  longer inverse-frequency weights, which said the finer thing (a rare shared tag
+  means more than a near-universal one) at the cost of a 5:1 spread the layout made
+  little of. The layout therefore makes exactly one claim about the weak links. The
+  same weight feeds the graph Louvain reads, so changing it changes the communities,
+  not only the picture. Note 1 in `force.py` has the measurements.
 - **Hulls are an independent cross-check, not decoration.** They outline Louvain
   communities computed on the weighted union graph with no knowledge of the geometry,
   so a hull that comes out long and tangled means the maths and the physics disagree

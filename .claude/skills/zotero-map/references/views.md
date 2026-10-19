@@ -1,5 +1,12 @@
 # The two views, and the decisions inside them
 
+**About the numbers in this file.** Every count and measurement below was taken on the
+library the map was developed against: about 90 items, mostly from the last fifteen
+years, with roughly 150 citation links and 150 vocabulary links. They record *why*
+each constant is what it is. They are not targets for any other library, and a
+different library will give different numbers without anything being wrong. Where a
+decision depends on the shape of the library, this file says so.
+
 One page, a mode switch in the header, and the mode in the URL — `map.html#timeline`
 and `map.html#clustering` each open in the view they name, so a link means the view it
 was read in.
@@ -18,10 +25,18 @@ survive a mode switch, including the current selection.
 
 ## Timeline: the year scale and the bands
 
-X is a **fixed decade scale**, not data-derived: the earlier span takes 40% of the
-width and the recent span the remaining 60%, so crowded recent years get double the
-room and the ratio stays put as sources are added rather than shifting under the
-reader. `frac()` in `render.py` is the single definition — `force.build()` is handed
+X is a **fixed decade scale**, not data-derived: 1960-2000 takes 40% of the width and
+2000-2030 the remaining 60%, so crowded recent years get double the room and the ratio
+stays put as sources are added rather than shifting under the reader.
+
+**That range is an assumption about the library, and the one most likely to be wrong
+for someone else's.** Years outside it are clamped to the nearest edge, so a library
+of older work - history, classics, a field whose canon predates 1960 - piles
+everything before 1960 into one column at the left. For such a library, change
+`YSTART`, `YBREAK`, `YEND` and `BREAK_FRAC` in `render.py`, and the matching
+`YEAR_BINS` in `force.py` (see *Colour by year*), to fit the range its sources
+actually span. They are fixed constants on purpose; choose them once per library
+rather than deriving them on every build. `frac()` in `render.py` is the single definition — `force.build()` is handed
 that same function for its seed rather than restating it, because two copies
 desynchronise the moment the decade break moves.
 
@@ -81,12 +96,12 @@ Four things underneath that are easy to get wrong:
   the ratio between a citation and a shared word is the layout's whole claim.
 - **A rest length is a target, not a ceiling.** Past `VOC_LEN` a spring pulls its pair
   together; *inside* it the spring pushes them apart. `VOC_LEN` was 497 — 10.4x the
-  citation length, about 329 canvas px — and at that length **87 of 148 vocabulary
-  springs were compressed and actively repelling**. The visible symptom was a source
-  sitting well outside its own hull with four dashed lines running into that hull: the
-  springs were satisfied, because a third of a canvas apart was what they asked for.
-  At 100 it is 3 of 148. If the dashed links ever look inert again, measure how many
-  are compressed before touching `VOC_STR`.
+  citation length, about 329 canvas px — and at that length **most vocabulary springs
+  (87 of 148 on the development library) were compressed and actively repelling**.
+  The visible symptom was a source sitting well outside its own hull with four dashed
+  lines running into that hull: the springs were satisfied, because a third of a
+  canvas apart was what they asked for. At 100 it was 3 of 148. If the dashed links
+  ever look inert, measure how many are compressed before touching `VOC_STR`.
 - **`VOC_STR` only means something once the rest length is right.** At `VOC_LEN` 100,
   sweeping it 0.149 / 0.25 / 0.5 / 0.75 / 1.0 gives 1.68x / 1.71x / 1.83x / 1.94x /
   1.97x. The same sweep at 497 gave 1.55x -> 1.52x and looked inert, because a stronger
@@ -99,21 +114,22 @@ Four things underneath that are easy to get wrong:
   expect it to sit tight.
 - **But it does move the communities.** The union graph Louvain reads is weighted the
   same way the springs are, so `VOC_STR` changes which clusters exist. Going from the
-  old inverse-frequency weights (0.035-0.280) to a flat 0.5 took 8 communities to 7 —
-  a two-item group was absorbed. Expect hull changes from a weight change, not layout
+  old inverse-frequency weights (0.035-0.280) to a flat 0.5 took the development
+  library from 8 communities to 7 — a two-item group was absorbed. Expect hull changes from a weight change, not layout
   changes.
 - A **speed clamp** (`V_MAX`) is load-bearing. Without it a spring-dominated setting
   diverges outright — millions of pixels across — which the canvas fit then quietly
   rescales into a plausible-looking but meaningless picture.
 
-**The numbers are a promise about what the picture looks like, and the physics is
-emergent, so re-measure if the library grows substantially.** Port `simStep` and
+**The numbers describe the development library, and the physics is emergent, so
+measure a new library before trusting them, and re-measure when one grows
+substantially.** Port `simStep` and
 `fitAndCollide` and run them at the shipped constants; that is how these figures were
 obtained. Separation does not vary smoothly with any knob, so nudging a constant by a
 step is not meaningful tuning. **Whether one named source lands inside its own hull is
 not a tuning target** — it flips on local-minimum noise. The aggregate to watch is how
-many sources sit outside their own community outline: 11 of 86 at `VOC_LEN` 497, 9 of
-86 at 100. Record what you measure beside the constants, as the comments do.
+many sources sit outside their own community outline - on the development library,
+11 of 86 at `VOC_LEN` 497 and 9 of 86 at 100. Record what you measure beside the constants, as the comments do.
 
 ### The seed, and the circularity in it
 
@@ -141,13 +157,15 @@ preset, which also dropped the balance to 0.002 and stretched the vocabulary spr
 
 ### Hull labels
 
-A label is a **tag value with its facet prefix dropped**: `approach: polycentricity`
-becomes `POLYCENTRICITY`. That is worth knowing before reading a hull name, because a
+A label is a **tag value with its facet prefix dropped**: `approach: discourse analysis`
+becomes `DISCOURSE ANALYSIS`. That is worth knowing before reading a hull name, because a
 bare value can look like it came from nowhere.
 
 The tag is the most **distinctive** one its members share, scored
 `(share within cluster) x log(N / library frequency)` — not the commonest, which would
-name nearly every hull `cross-cutting` (49 of 94 items). For a small cluster whose
+name nearly every hull after the broad catch-all value most libraries carry on a large
+share of their items (`subject: cross-cutting` held about half of the development
+library). For a small cluster whose
 members carry identical tags the share term is 1.0 for every candidate, so the label is
 simply the rarest tag they share.
 
@@ -156,20 +174,18 @@ simply the rarest tag they share.
 `"affinity"` and read from there by `force.py` so the two cannot drift. Anything else
 is ineligible, `role:` included.
 
-That restriction is new, and it fixed real nonsense. Labelling previously accepted any
-facet, so `evidence:` could win: a two-member cluster was called `popular / secondary`
-(from `evidence: popular / secondary`, 6 of 94 — the rarest tag its members shared) and
-an 18-member one was called `benchmark / experiments`. Neither facet builds vocabulary
-edges or is read by Louvain, so both names described something the layout had never
-used — the second actively misleading, since those 18 sources were grouped by shared
-remote-sensing and self-supervised-learning vocabulary, not by being benchmark papers.
-They are `game theory` and `self-supervised learning` now. **If a label ever reads like
-it belongs to a different question than the cluster, check which facet it came from
-first.**
+That restriction fixed real nonsense. Labelling once accepted any facet, so
+`evidence:` could win. On the development library, a two-member cluster was named after
+the `evidence:` value its members happened to share - a kind of argument, not a topic -
+and an 18-member cluster grouped by shared *topical* vocabulary was named after the
+research design most of its members used. Neither facet builds vocabulary edges or is
+read by Louvain, so both names described something the layout had never used, and the
+second was actively misleading. **If a label ever reads like it belongs to a different
+question than the cluster, check which facet it came from first.**
 
 A community carrying no forming tag at all is held together by citations alone and has
 no vocabulary to be named after; it comes out `unlabelled` rather than borrowing a
-facet that took no part. None exist on the current library.
+facet that took no part. How many a library has depends on how fully it is tagged.
 
 Hulls are faint and unlabelled until a source is **selected**, at which point every
 cluster whose area covers it turns solid and names itself in a boxed label, pushed
@@ -179,18 +195,21 @@ looking at.
 
 Every community with at least `HULL_MIN` members gets an outline. That threshold lives
 in `force.py` and is shipped in the payload, so the hull count and the "*n* clusters"
-readout cannot drift apart. It is **2**: it was 3 on the argument that a ring drawn
-around a pair states nothing, but an unringed pair was indistinguishable from two
-sources the maths never grouped, and a pair that Louvain made its own community is a
-claim worth seeing. On this library that draws 7 hulls rather than 5.
+readout cannot drift apart. It is **3**: three sources make a cluster, and a ring drawn
+around a pair asserts a grouping too small to read as one. On the development library
+two of Louvain's seven communities were pairs, so five hulls are drawn.
 
-A two-member community has no polygon — the convex hull of two points is a line
-segment with no area, and three collinear members collapse the same way. `ringHull()`
-handles that by hulling points sampled on each member's **circle** instead of their
-centres, which yields a real capsule around the pair that is guaranteed to contain the
-node fills. It is reached only when the plain hull has degenerated, so no outline that
-already existed is affected. Raising `HULL_MIN` back to 3 would leave that path
-unreachable; delete it if you do.
+2 was tried and is a defensible alternative: it makes every community Louvain found
+visible, where at 3 an un-outlined pair looks the same as two sources the maths never
+grouped. The setting governs only what is *outlined* — membership, springs and labels
+are untouched, so changing it cannot move a node.
+
+A degenerate hull has no polygon: three collinear members give a line segment with no
+area, and so would a two-member community if `HULL_MIN` were 2. `ringHull()` handles
+both by hulling points sampled on each member's **circle** instead of their centres,
+which yields a real capsule guaranteed to contain the node fills. It is reached only
+when the plain hull has degenerated, so no other outline is affected. **Keep it at
+`HULL_MIN` 3** — a size-3 community can still be collinear.
 
 Each hull covers its community's **core** — members within 1.6× the median distance
 from its centroid — and its label says how many of the members that is, so a label
@@ -213,16 +232,21 @@ Expect the communities **not** to match the Zotero collections. That is the poin
 
 ### Colour by year
 
-Ten **fixed** bins, decades at the old end and five-year bands at the recent end.
+Ten **fixed** bins (`YEAR_BINS` in `force.py`), decades at the old end and five-year
+bands at the recent end.
 Fixed rather than stretched over the library's own earliest and latest year, so the
 scale means the same thing on every rebuild and adding one very old source cannot
 silently recolour everything else. Empty bins still appear in the key so it reads as a
 scale.
 
-**The recent end is finer on purpose.** Most libraries of this kind are heavily
-weighted to the last fifteen years, so whole decades there lump most of the library
-into two colours. Five-year bands split that usefully; the sparse old decades are
-compressed to pay for it. Re-check the distribution if the library's shape changes.
+**The recent end is finer on purpose, and that is an assumption about the library.**
+The bins suit a library weighted towards the last fifteen years, as research on an
+active topic usually is: whole decades there would lump most of it into two colours,
+so five-year bands split that usefully and the sparse old decades are compressed to
+pay for it. A library centred on older work needs the opposite - finer bins where its
+sources are - and the same ten-bin structure re-stepped to its own range, together
+with the timeline range above. Count sources per bin before choosing, and keep the
+ramp itself (below) unchanged.
 
 Red for the oldest bin, green for the newest. Red-to-green is the least
 colourblind-safe pair there is, so the ramp carries its order in **lightness** as well
