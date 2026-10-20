@@ -1,12 +1,35 @@
 
 /* --- mode switch + clustering --- */
-.modesw{display:flex;gap:0;margin-left:auto}
-.msw{appearance:none;background:transparent;border:1px solid var(--line);
+/* The view switch has a row of its own, centred, directly above the controls it swaps
+   and the map they act on. */
+.moderow{display:flex;justify-content:center;border:1px solid var(--line);border-bottom:0;
+  padding:9px 12px;background:var(--panel)}
+.modesw{display:flex;gap:0}
+.moderow .msw{font-size:12px;letter-spacing:.14em;padding:6px 26px}
+/* Each view's controls: labelled switches centred in a row the colour of the view
+   switch's, small actions on the left, the row's count on the right. Clustering has
+   no actions, so an empty ::before stands in for that column and the switches still
+   sit at the true centre. */
+.swrow{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;background:var(--panel);padding:7px 12px}
+.swrow.cl::before{content:""}
+.swrow .sml{display:flex;justify-self:start}
+.swrow .sml .exb{margin-left:0}
+.swrow .sml .exb+.exb{margin-left:-1px}
+.tsw{white-space:nowrap}
+.tsw .tn{opacity:.6;font-weight:400}
+.swrow .bcn{justify-self:end;margin-left:0;padding-right:0;text-align:right}
+.swgs{display:flex;gap:26px;flex-wrap:wrap;justify-content:center}
+.swg{display:inline-flex;align-items:center;gap:6px 9px;flex-wrap:wrap;justify-content:center}
+.swl{white-space:nowrap;font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--dimmer)}
+.seg{display:inline-flex}
+@media(max-width:640px){.swrow{grid-template-columns:1fr;gap:6px}.swrow.cl::before{display:none}
+.swrow .bcn,.swrow .sml{justify-self:center}}
+.msw,.tsw{appearance:none;background:transparent;border:1px solid var(--line);
   font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--dimmer);
   padding:3px 10px;cursor:pointer;text-transform:uppercase;margin-left:-1px}
-.msw:hover{color:var(--accent)}
-.msw[aria-pressed="true"]{color:var(--bg);background:var(--accent);border-color:var(--accent);font-weight:700}
-.msw:focus-visible{outline:1px solid var(--accent);outline-offset:2px}
+.msw:hover,.tsw:hover{color:var(--accent)}
+.msw[aria-pressed="true"],.tsw[aria-pressed="true"]{color:var(--bg);background:var(--accent);border-color:var(--accent);font-weight:700}
+.msw:focus-visible,.tsw:focus-visible{outline:1px solid var(--accent);outline-offset:2px}
 body[data-mode="cluster"] .tl{display:none!important}
 body[data-mode="timeline"] .cl{display:none!important}
 .hull{fill:var(--accent);fill-opacity:.028;stroke:var(--accent);stroke-opacity:.42;

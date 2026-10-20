@@ -77,7 +77,7 @@ All 500 ticks are a couple of million pair operations and take about a tenth of 
 second, so they run **synchronously** and only the journey is animated, with progress
 measured in milliseconds rather than frames. A timer finishes the transition if rAF
 never does, so the layout cannot be stranded mid-interpolation with `settling` stuck
-true — which would also block the next re-settle.
+true.
 
 This burned two review passes: one judged pictures 100 ticks in rather than 500, and
 the other read hull counts off a part-way interpolation. **When checking clustering

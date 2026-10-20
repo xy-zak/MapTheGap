@@ -34,6 +34,11 @@ title: where the library is being read from (*reading zotero app* or *reading
 zotero.org*, with the reason behind `[?]`), how many items have changed since the map
 was built (new, edited, removed, with titles behind `[show]`), and an **update map**
 button that shows each stage, a progress bar and the time left.
+Two guide pages hang off the strip, each with the current map's own numbers:
+**tagging** (`/tagging`: the four facets, the rules, the live vocabulary against its
+cap, and prompts for having Claude tag with the `zotero-tag` skill) and **citations**
+(`/citations`: how OpenAlex and Semantic Scholar lookups become lines and roles, and
+prompts for chasing a wrong-looking source with the `zotero-map` skill).
 
 Changes are counted from whichever source can be read now, whichever the map was
 built from. While Zotero is open with its local API on (see Requirements), that is the

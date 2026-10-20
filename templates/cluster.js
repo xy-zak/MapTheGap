@@ -13,6 +13,7 @@
        a gutter where its position is declared meaningless.
    ====================================================================== */
 const FR=D.force, FRAD=FR.rad, FCOM=FR.com;
+FR.w=CW;                 /* fit to the page's width, not the width force.py assumed */
 const GUT_H=FR.gutter.length?74:0, FGH=FR.h+GUT_H;
 const P={};
 FR.sim.forEach(k=>{P[k]={x:FR.seed[k][0],y:FR.seed[k][1],vx:0,vy:0,fx:0,fy:0};});
@@ -138,14 +139,10 @@ function computeLayout(){
 function settle(){
   if(settling)return;
   settling=true;
-  const sx={},sy={};
-  if(settled){                       /* re-settle: glide from the layout on screen */
-    FR.sim.forEach(k=>{sx[k]=P[k].fx;sy[k]=P[k].fy;});
-  }else{                             /* first entry: start from the fitted seed */
-    FR.sim.forEach(k=>{const q=P[k];q.x=FR.seed[k][0];q.y=FR.seed[k][1];});
-    fitAndCollide();
-    FR.sim.forEach(k=>{sx[k]=P[k].fx;sy[k]=P[k].fy;});
-  }
+  const sx={},sy={};                 /* the journey starts from the fitted seed */
+  FR.sim.forEach(k=>{const q=P[k];q.x=FR.seed[k][0];q.y=FR.seed[k][1];});
+  fitAndCollide();
+  FR.sim.forEach(k=>{sx[k]=P[k].fx;sy[k]=P[k].fy;});
   computeLayout();
   const tx={},ty={};
   FR.sim.forEach(k=>{tx[k]=P[k].fx;ty[k]=P[k].fy;});
@@ -174,8 +171,7 @@ function settle(){
   /* requestAnimationFrame is a courtesy, not a guarantee: it is throttled in a
      background tab and in headless Chrome it stops outright after a handful of
      frames. A timer finishes the job regardless, so the layout can never be left
-     stranded mid-interpolation with `settling` stuck true — which would also block
-     the next re-settle, since that guards on it. Both paths are idempotent. */
+     stranded mid-interpolation with `settling` stuck true. Both paths are idempotent. */
   setTimeout(finish,DUR+150);
 }
 
@@ -447,11 +443,7 @@ function setMode(m){
 
 document.querySelectorAll('.msw').forEach(b=>
   b.addEventListener('click',()=>setMode(b.dataset.m)));
-document.getElementById('resettle').addEventListener('click',()=>{
-  settled=false;while(gH.firstChild)gH.removeChild(gH.firstChild);settle();});
-document.getElementById('cby').addEventListener('click',e=>{
-  COLOR=COLOR==='role'?'year':'role';
-  e.currentTarget.textContent='colour: '+COLOR;paint();});
+segSwitch('cby',v=>{COLOR=v;paint();});
 
 document.getElementById('ccn').textContent=
   FR.clusters.filter(c=>c.size>=HMIN).length+' clusters \u00b7 '+FR.sim.length+' simulated \u00b7 '

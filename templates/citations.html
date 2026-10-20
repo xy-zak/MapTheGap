@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MapTheGap Citations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="/app/map.css">
+<link rel="stylesheet" href="/app/app.css">
+</head>
+<body data-page="citations">
+<div class="wrap">
+<div class="bar"><span class="t">ZOTERO :: CITATION MAP :: CITATIONS</span>
+  <span class="nav"><a class="m" href="/">[← map]</a><a class="m" href="/tagging">[tagging]</a><a class="m" href="/setup">[settings]</a></span></div>
+<div class="steps">
+
+  <section class="step">
+    <span class="no">00</span>
+    <div>
+      <h2>What a line on the map means</h2>
+      <p>A solid line A → B means <b>A's reference list includes B</b>, and both are in your library. Nothing else draws one.</p>
+      <p>Zotero doesn't record citations, so the map asks <b>OpenAlex</b> and <b>Semantic Scholar</b> for each item's references, then keeps the ones that point back into your library.</p>
+      <div class="flow" aria-label="the build, step by step">
+        <span>Zotero items</span><i>→</i><span>01 identify<br><small>OpenAlex, by DOI</small></span><i>→</i>
+        <span>02 reference lists<br><small>OpenAlex, then Semantic Scholar</small></span><i>→</i>
+        <span>03 match into the library</span><i>→</i><span>04 roles</span>
+      </div>
+      <div id="live" class="live dim">Reading the map…</div>
+    </div>
+  </section>
+
+  <section class="step">
+    <span class="no">01</span>
+    <div>
+      <h2>Identify each item in OpenAlex</h2>
+      <p>Each item with a DOI is looked up:</p>
+      <pre class="q">GET https://api.openalex.org/works/doi:<span>10.1017/cbo9781316423936</span>?mailto=<span>you@example.com</span></pre>
+      <p>This returns its <b>OpenAlex ID</b>, which other reference lists point at, plus its own references and citation count.</p>
+      <ul>
+        <li><b>No DOI</b> (most books, talks, blog posts): not looked up, unless an ID was confirmed by hand.</li>
+        <li><b>Split records.</b> OpenAlex often splits a book across editions. Extra IDs can be listed so citations to any of them count.</li>
+        <li><b>arXiv IDs</b> are read from the DOI, Archive ID, URL or Extra field.</li>
+        <li><b>Years come from Zotero</b>, which you can correct, not from OpenAlex.</li>
+      </ul>
+      <p class="dim">The contact address from setup gets faster service.</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <span class="no">02</span>
+    <div>
+      <h2>Fetch each reference list</h2>
+      <p>OpenAlex's list is used when it isn't empty. Otherwise (often for preprints) the build asks Semantic Scholar, and keeps each reference's <b>DOI</b> and <b>arXiv ID</b>:</p>
+      <pre class="q">GET https://api.semanticscholar.org/graph/v1/paper/<span>DOI:10.48550/arxiv.2010.08168</span>?fields=title,year,externalIds,references.externalIds</pre>
+      <p class="dim">About one request every five seconds without an account, which is why the first build is slow.</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <span class="no">03</span>
+    <div>
+      <h2>Keep the references that point into your library</h2>
+      <p>A → B is drawn when one of A's references matches B:</p>
+      <div class="tbl"><table>
+        <thead><tr><th>A's reference is…</th><th>and matches B's…</th><th>line labelled</th></tr></thead>
+        <tbody>
+          <tr><td>an OpenAlex work ID</td><td>OpenAlex ID, or any extra ID listed for it</td><td><code>openalex</code></td></tr>
+          <tr><td>a DOI, from Semantic Scholar</td><td>DOI</td><td><code>semanticscholar</code></td></tr>
+          <tr><td>an arXiv ID, from Semantic Scholar</td><td>arXiv ID</td><td><code>semanticscholar</code></td></tr>
+          <tr><td>a pair confirmed by reading the paper</td><td>-</td><td><code>manual</code></td></tr>
+        </tbody>
+      </table></div>
+      <p>A line that points forward in time triggers a warning. It's usually a wrong date in Zotero.</p>
+    </div>
+  </section>
+
+  <section class="step" id="roles">
+    <span class="no">04</span>
+    <div>
+      <h2>Turn the lines into roles</h2>
+      <div class="tbl"><table>
+        <thead><tr><th>role</th><th>rule</th><th>in your library</th></tr></thead>
+        <tbody>
+          <tr><td><span class="ci" style="color:var(--found)">foundational</span></td><td>cited by at least <b id="fthr">N</b> sources here: the 80th percentile, never under 3</td><td class="rc" data-r="foundational"></td></tr>
+          <tr><td><span class="ci" style="color:var(--add)">additional</span></td><td>linked to at least one other source, below that</td><td class="rc" data-r="additional"></td></tr>
+          <tr><td><span class="ci" style="color:var(--contra)">contrarian</span></td><td>tagged <code>role: contrarian</code> by judgement; overrides the rest</td><td class="rc" data-r="contrarian"></td></tr>
+          <tr><td><span class="ci" style="color:var(--sat)">satellite</span></td><td>no lines to anything in the library</td><td class="rc" data-r="satellite"></td></tr>
+        </tbody>
+      </table></div>
+      <p>Roles are recomputed every build and written back as <code>role:</code> tags. Contrarian can't be computed: a reference list says that one work cited another, not whether it agreed.</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <span class="no">05</span>
+    <div>
+      <h2>The dashed lines aren't citations</h2>
+      <p>In clustering, a faint dashed line joins two sources that share at least half their <code>subject:</code>, <code>question:</code> and <code>approach:</code> tags (Jaccard ≥ <span id="jac">0.5</span>) and have no citation between them. They share language, not influence. See <a href="/tagging">tagging info</a>.</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <span class="no">06</span>
+    <div>
+      <h2>Reading the map honestly</h2>
+      <ul>
+        <li><b>A missing line means missing index data</b>, not missing influence.</li>
+        <li><b>Books, recordings and blog posts drift to satellite.</b> Satellite never means unimportant.</li>
+        <li><b>Collections with no lines between them</b> may really be separate.</li>
+        <li><b>Only successful lookups are saved</b>, so failures are retried on the next build.</li>
+      </ul>
+      <div id="unres"></div>
+    </div>
+  </section>
+
+  <section class="step">
+    <span class="no">07</span>
+    <div>
+      <h2>When a source looks wrong, ask Claude</h2>
+      <p>Most odd results come from step 01. The <code>zotero-map</code> skill checks the cached reference lists and proposes a fix in <code>aliases.json</code>. Start Claude Code in the MapTheGap folder and ask:</p>
+      <div class="prompts">
+        <div class="prompt"><p>Why is "Prisoner's Dilemma" a satellite? I'd expect the game-theory papers to cite it.</p><span class="why">often a split record, or no DOI</span></div>
+        <div class="prompt"><p>&lt;citing paper&gt; cites &lt;cited paper&gt;, but the map has no line between them. Find out why.</p><span class="why">checks identities and cached references</span></div>
+        <div class="prompt"><p>Rebuild the map and tell me which roles changed before writing any role tags.</p><span class="why">the diff comes first</span></div>
+        <div class="prompt"><p>Which of my sources argue against the foundational ones? Give me the quote behind each candidate, and don't tag anything until I approve.</p><span class="why">contrarian candidates, one by one</span></div>
+        <div class="prompt"><p>Which citations point forward in time, and which dates should I fix in Zotero?</p><span class="why">a to-do list of dates</span></div>
+      </div>
+      <p class="dim">Fixes go into <code>aliases.json</code> or Zotero, never the built map, so rebuilds keep them. Press <b>update map</b> afterwards.</p>
+    </div>
+  </section>
+
+</div>
+</div>
+<script src="/app/app.js"></script>
+<script>
+(function(){
+const {api,esc}=window.MTG;
+const $=id=>document.getElementById(id);
+
+api('/api/info').then(d=>{
+  if(!d.map){$('live').textContent='No map has been built yet. Once it has, this library\'s numbers appear here.';return;}
+  const E=d.edges,n=k=>E[k]||0;
+  $('live').innerHTML=`<b>Your library</b>, as of ${esc(d.map.built)}: <b>${d.items}</b> sources, `+
+    `<b>${d.edge_total}</b> citation lines (${n('openalex')} OpenAlex, ${n('semanticscholar')} Semantic Scholar, ${n('manual')} by hand), `+
+    `<b>${d.tag_edges}</b> vocabulary links, <b>${d.no_doi}</b> without a DOI.`;
+  $('fthr').textContent=d.threshold.foundational_in_degree;
+  document.querySelectorAll('.rc').forEach(td=>{td.textContent=d.roles[td.dataset.r]||0;});
+  if(d.tag_min!=null)$('jac').textContent=d.tag_min;
+  if(d.unresolved.length)$('unres').innerHTML='<p>Known hard-to-place items:</p><ul>'+
+    d.unresolved.map(u=>`<li><b>${esc(u.title)}</b> <span class="dim">${esc(u.why)}</span></li>`).join('')+'</ul>';
+}).catch(e=>{$('live').textContent='Couldn\'t read the map: '+e.message;});
+
+document.querySelectorAll('.prompt').forEach(el=>{
+  const b=document.createElement('button');b.type='button';b.className='lnk copy';b.textContent='[copy]';
+  b.addEventListener('click',()=>navigator.clipboard.writeText(el.querySelector('p').textContent).then(()=>{
+    b.textContent='[copied]';setTimeout(()=>{b.textContent='[copy]';},1400);}));
+  el.appendChild(b);
+});
+})();
+</script>
+</body>
+</html>

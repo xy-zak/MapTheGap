@@ -8,16 +8,15 @@ __FCSS__
 </style>
 <div class="wrap">
 <div class="bar"><span class="t">ZOTERO :: CITATION MAP</span>
-  <span class="modesw" id="modesw">
-    <button class="msw" data-m="timeline" aria-pressed="true">timeline</button>
-    <button class="msw" data-m="cluster" aria-pressed="false">clustering</button>
+  <span class="expg keyg">
+    <button class="exb" id="keyb" aria-expanded="false" aria-controls="legend" title="what the lines, circles and outlines mean">[+] key</button>
   </span>
   <span class="expg">
     <button class="exb" id="expsvg" title="save the graph exactly as it stands — same view, same filters, same selection — as an SVG with no background and dark ink">[↓] svg</button>
     <button class="exb" id="expcopy" title="copy that same SVG to the clipboard instead of downloading it">[⧉] copy</button>
   </span>
   <span class="m">__GEN__</span></div>
-<div class="legend">
+<div class="legend" id="legend" hidden>
   <div class="lrow"><span class="k"><svg width="40" height="9"><line x1="0" y1="4.5" x2="40" y2="4.5" stroke="#b0a3a0" stroke-width="1.6"/></svg></span><span class="t"><b>citation</b> this source's reference list contains that one — directed, so it always points back in time. Read from published reference lists via OpenAlex, with Semantic Scholar covering preprints.</span></div>
   <div class="lrow tl"><span class="k"><svg width="40" height="9"><line x1="0" y1="4.5" x2="40" y2="4.5" stroke="#6B5E73" stroke-width="1.6" stroke-dasharray="2 3"/></svg></span><span class="t"><b>shared vocabulary</b> tag overlap of 0.50 or better — shared tags divided by all tags across both — on subject, question and approach. Drawn only where no citation exists, since a citation says strictly more.</span></div>
   <div class="lrow cl"><span class="k"><svg width="40" height="14"><circle cx="8" cy="7" r="3" fill="none" stroke="#6B5E73" stroke-width="1.2"/><circle cx="31" cy="7" r="3" fill="none" stroke="#6B5E73" stroke-width="1.2"/><path d="M12 7 Q19.5 7 27 7" stroke="#6B5E73" stroke-width="1.2" stroke-dasharray="1.5 2.5" fill="none" opacity=".6"/></svg></span><span class="t"><b>position</b> an output of the links, not the year: citations pull hard, vocabulary weakly, every source repels every other. Only who sits <i>beside</i> whom means anything — distance between far-apart groups does not. Vocabulary is drawn thin and faint, so a group joined only by dashes shares language but cites nothing. Distance is not a scale: there is one fixed arrangement, and it is the only one the physics offers.</span></div>
@@ -26,9 +25,10 @@ __FCSS__
   <div class="lrow"><span class="k"><svg width="40" height="15"><line x1="0" y1="3" x2="40" y2="3" stroke="#e6604f" stroke-width="1.9"/><line x1="0" y1="8" x2="40" y2="8" stroke="#6fdc8c" stroke-width="1.9"/><line x1="0" y1="13" x2="40" y2="13" stroke="#FAFCFB" stroke-width="1.9" stroke-dasharray="2 3"/></svg></span><span class="t"><b>on selecting a source</b> <i class="ci" style="color:#e6604f">red</i> what it cites &middot; <i class="ci" style="color:#6fdc8c">green</i> what cites it &middot; <i class="ci" style="color:#FAFCFB">white</i> shared vocabulary</span></div>
 </div>
 <div class="qbar">
-  <span class="p">/</span>
-  <input id="q" class="q" type="text" autocomplete="off" spellcheck="false"
-         placeholder="filter by title, author, year, tag, doi or abstract…">
+  <label for="q" class="qi" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 15 15"><circle cx="6.2" cy="6.2" r="4.7" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="9.8" y1="9.8" x2="13.8" y2="13.8" stroke="currentColor" stroke-width="1.8"/></svg></label>
+  <input id="q" class="q" type="search" autocomplete="off" spellcheck="false" aria-label="Search the map"
+         placeholder="search titles, authors, years, tags, DOIs or abstracts…">
+  <kbd class="qk" title="press / to search">/</kbd>
   <button id="qc" class="qc" hidden>[clear]</button>
 </div>
 <div class="filters" id="filters"></div>
@@ -37,16 +37,19 @@ __FCSS__
   <input id="scrub" class="sc" type="range" min="1" step="1" value="1" aria-label="Replay library growth">
   <span class="scn" id="scn"></span>
 </div>
-<div class="bandctl tl" id="bandfacet"></div>
-<div class="bandctl tl">
-  <button id="expall" class="bc">[+] expand all</button>
-  <button id="colall" class="bc">[−] collapse all</button>
-  <button id="sizesw" class="bc">size: citations</button>
+<div class="moderow">
+  <span class="modesw" id="modesw" role="group" aria-label="view">
+    <button class="msw" data-m="timeline" aria-pressed="true">timeline</button>
+    <button class="msw" data-m="cluster" aria-pressed="false">clustering</button>
+  </span>
+</div>
+<div class="bandctl tl swrow">
+  <span class="sml"><button id="expall" class="exb">[+] expand all</button><button id="colall" class="exb">[−] collapse all</button></span>
+  <span class="swgs" id="tlsw"><span class="swg"><span class="swl">band by</span><span class="seg" id="bandfacet" role="group" aria-label="band the timeline by"></span></span><span class="swg" id="sizesw"><span class="swl">size</span><span class="seg" role="group" aria-label="circle size"><button class="tsw" data-v="citations" aria-pressed="true">citations</button><button class="tsw" data-v="uniform" aria-pressed="false">uniform</button></span></span></span>
   <span class="bcn" id="bcn"></span>
 </div>
-<div class="bandctl cl">
-  <button id="resettle" class="bc">[↻] re-settle</button>
-  <button id="cby" class="bc">colour: role</button>
+<div class="bandctl cl swrow">
+  <span class="swgs" id="clsw"><span class="swg"><span class="swl">colour</span><span class="seg" id="cby" role="group" aria-label="colour circles by"><button class="tsw" data-v="role" aria-pressed="true">role</button><button class="tsw" data-v="year" aria-pressed="false">year</button></span></span></span>
   <span class="bcn" id="ccn"></span>
 </div>
 <div class="bandctl cl" id="ykey" style="display:none">

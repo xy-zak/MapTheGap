@@ -13,8 +13,8 @@
 <body data-page="setup">
 <div class="wrap">
 <div class="bar"><span class="t">ZOTERO :: CITATION MAP :: SETUP</span>
-  <span><a class="m" id="tomap" href="/" hidden>[← back to the map]</a>
-  <button class="lnk m" id="quit" type="button" title="stop the app">[quit]</button></span></div>
+  <span class="nav"><a class="m" id="tomap" href="/" hidden>[← back to the map]</a><a class="m" href="/tagging">[tagging]</a><a class="m" href="/citations">[citations]</a>
+  <button class="lnk m stop" id="quit" type="button" title="stop the app">[■] quit</button></span></div>
 <div class="steps">
 
   <section class="step" id="s-linked" hidden>
@@ -124,7 +124,7 @@ $('f').addEventListener('submit',e=>{
 
 $('quit').addEventListener('click',()=>{
   window.MTG.quit().then(()=>{
-    document.querySelector('.steps').innerHTML='<section class="step"><span class="no">■</span><div>'+
+    document.querySelector('.steps').innerHTML='<section class="step dead"><span class="no">■</span><div>'+
       '<h2>MapTheGap has stopped</h2><p>Start it again from its launcher whenever you want it back.</p></div></section>';
     $('quit').hidden=true;$('tomap').hidden=true;
   });

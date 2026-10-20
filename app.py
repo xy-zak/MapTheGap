@@ -53,6 +53,8 @@ STATIC = {
     "/app/app.css": ("app.css", "text/css; charset=utf-8"),
     "/app/map.css": ("map.css", "text/css; charset=utf-8"),
     "/setup": ("setup.html", "text/html; charset=utf-8"),
+    "/tagging": ("tagging.html", "text/html; charset=utf-8"),
+    "/citations": ("citations.html", "text/html; charset=utf-8"),
 }
 INJECT = '\n<link rel="stylesheet" href="/app/app.css">\n<script src="/app/app.js"></script>\n'
 
@@ -116,6 +118,43 @@ def map_info():
     # the day without a leading zero, which strftime spells differently on Windows
     return {"source": g.get("library_source", "web"),
             "built": f"{t.tm_mday} {time.strftime('%b %H:%M', t)}"}
+
+
+FACETS = ("subject:", "question:", "approach:", "evidence:")
+FACET_CAP = 15     # the zotero-tag skill's limit per facet
+
+
+def library_info():
+    """What the map on screen says about the library's tags and citations.
+
+    For the tagging and citation pages. Everything is read from graph.json, so it is
+    the library as of the last build - the pages say so - and costs no Zotero call.
+    """
+    g = graph()
+    if g is None:
+        return {"map": None}
+    nodes = g["nodes"]
+    facets, unprefixed, per_item = {}, collections.Counter(), []
+    for f in FACETS + ("role:",):
+        c = collections.Counter(t[len(f):].strip() for n in nodes for t in n["tags"]
+                                if t.startswith(f))
+        facets[f] = sorted(c.items(), key=lambda v: (-v[1], v[0]))
+    for n in nodes:
+        unprefixed.update(t for t in n["tags"] if ":" not in t)
+        per_item.append(sum(1 for t in n["tags"] if t.startswith(FACETS)))
+    per_item.sort()
+    via = collections.Counter(e["via"] for e in g["edges"])
+    return {"map": map_info(), "items": len(nodes), "cap": FACET_CAP, "facets": facets,
+            "unprefixed": dict(unprefixed.most_common()),
+            "median_tags": per_item[len(per_item) // 2] if per_item else 0,
+            "untagged": sum(1 for k in per_item if k == 0),
+            "edges": dict(via), "edge_total": len(g["edges"]),
+            "tag_edges": len(g.get("tag_edges") or []), "tag_min": g.get("tag_min"),
+            "threshold": g.get("threshold") or {},
+            "roles": dict(collections.Counter(n.get("role") for n in nodes)),
+            "no_doi": sum(1 for n in nodes if not n.get("doi")),
+            "unresolved": [{"title": n["title"], "why": n["unresolved"]}
+                           for n in nodes if n.get("unresolved")]}
 
 
 # ---------------------------------------------------------------- Zotero
@@ -725,6 +764,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._file(*STATIC[path])
         if path == "/api/setup":
             return self._send(200, setup_state())
+        if path == "/api/info":
+            return self._send(200, library_info())
         if path == "/api/status":
             is_open = zotero_open()
             reading = reading_from(is_open)

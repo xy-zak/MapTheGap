@@ -78,9 +78,11 @@ function Strip(host,mode,onDone){
     const hot=c.state==='ok'&&c.count>0;
     row.innerHTML=`<span class="it src${r.source!=='local'&&s.zotero_open?' warn':''}" title="${esc(why)}">${z}<button class="lnk" data-a="src">[?]</button></span>`+
       `<span class="it grow">${ch}</span>`+
+      `<a class="bc" href="/tagging" title="how to tag sources, by hand or with Claude">tagging</a>`+
+      `<a class="bc" href="/citations" title="how the map works out what cites what">citations</a>`+
       `<a class="bc" href="/setup" title="Zotero key and contact address">settings</a>`+
-      `<button class="bc" data-a="quit" title="stop the app; the map on this page stays readable">quit</button>`+
-      `<button class="bc${hot?' hot':''}" data-a="update" title="rebuild the map, reading the library from ${esc(where)}">[↻] update map</button>`;
+      `<button class="bc go${hot?' hot':''}" data-a="update" title="rebuild the map, reading the library from ${esc(where)}">[↻] update map</button>`+
+      `<button class="bc stop" data-a="quit" title="stop the app; the map on this page stays readable">[■] quit</button>`;
     if(dropFor==='changes'){
       if(c.state==='ok'&&c.count)drop.innerHTML=changesHtml(c);else{drop.hidden=true;dropFor=null;}
     }else if(dropFor==='src')drop.innerHTML=srcHtml(s);
@@ -100,16 +102,29 @@ function Strip(host,mode,onDone){
     }else if(r.state==='failed'){
       row.innerHTML=`<span class="it grow"><span class="err">update failed: ${esc(r.error||'see the log')}</span></span>`+
         `<button class="bc" data-a="log">[log]</button><button class="bc" data-a="dismiss">[dismiss]</button>`+
-        `<button class="bc" data-a="update">[↻] retry</button>`;
+        `<button class="bc go" data-a="update">[↻] retry</button>`;
     }else if(r.state==='cancelled'){
       row.innerHTML=`<span class="it grow">update cancelled - the map was left as it was</span>`+
-        `<button class="bc" data-a="dismiss">[dismiss]</button><button class="bc" data-a="update">[↻] update map</button>`;
+        `<button class="bc" data-a="dismiss">[dismiss]</button><button class="bc go" data-a="update">[↻] update map</button>`;
     }else if(r.state==='done'){
       row.innerHTML=`<span class="it grow"><span class="ok">map updated in ${dur(r.elapsed)}</span> - loading it…</span>`;
     }
   }
 
+  /* Stopped, from the page or from its terminal: the whole row turns red, so a map left
+     open in a tab can't be mistaken for one that is still being kept up to date. The
+     poll carries on behind a lost server, and the row comes back when it answers. */
+  const GONE='MapTheGap isn\'t running: it was quit, or its window was closed. The map stays readable here; '+
+    'start MapTheGap from its launcher to update it.';
+  function dead(text){
+    row.classList.add('dead');drop.hidden=true;dropFor=null;
+    row.innerHTML=`<span class="it grow">[■] ${esc(text)}</span>`;
+  }
+  /* map.js replays the library's growth once on the next load when this is set */
+  function rebuilt(){try{sessionStorage.setItem('mtg.rebuilt','1');}catch(e){}}
+
   function draw(){
+    row.classList.remove('dead');
     if(run&&(run.state==='running'||(!dismissed&&(run.state==='failed'||run.state==='cancelled'))))running(run);
     else if(mode==='map')idle();
     else row.innerHTML='';
@@ -123,15 +138,15 @@ function Strip(host,mode,onDone){
       api('/api/update'+(dropFor==='log'?'?log=1':'')).then(r=>{
         run=r;
         if(dropFor==='log')drop.innerHTML=logHtml(r.log);
-        if(r.state==='done'&&watching){running(r);setTimeout(onDone,700);return;}
+        if(r.state==='done'&&watching){running(r);setTimeout(()=>{rebuilt();onDone();},700);return;}
         draw();schedule(r.state==='running'?500:10000);
-      }).catch(()=>schedule(2000));
+      }).catch(()=>{dead(GONE);schedule(5000);});
     }else if(mode==='map'){
       api('/api/status').then(s=>{
         status=s;
         if(s.run.state==='running'){run=s.run;watching=true;dismissed=false;draw();schedule(500);return;}
         draw();schedule(10000);
-      }).catch(()=>{row.innerHTML='<span class="it grow"><span class="err">lost the app server - is app.py still running?</span></span>';schedule(5000);});
+      }).catch(()=>{dead(GONE);schedule(5000);});
     }
   }
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)tick();});
@@ -146,9 +161,8 @@ function Strip(host,mode,onDone){
     else if(act==='cancel'){a.disabled=true;api('/api/update/cancel',{}).then(r=>{run=r;draw();});}
     else if(act==='update')start();
     else if(act==='quit')quit().then(()=>{
-      stopped=true;clearTimeout(poll);drop.hidden=true;
-      row.innerHTML='<span class="it grow">MapTheGap has stopped. The map stays readable here; '+
-        'to update it again, start MapTheGap from its launcher.</span>';
+      stopped=true;clearTimeout(poll);
+      dead('MapTheGap has stopped. The map stays readable here; start MapTheGap from its launcher to update it.');
     });
   });
 

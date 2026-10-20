@@ -17,8 +17,22 @@ const vis=n=>on[n.role]&&match(n)&&n.rank<=tmax;
 const NS='http://www.w3.org/2000/svg';
 const el=(t,a)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e;};
 const svg=document.getElementById('svg');
-svg.setAttribute('viewBox',`0 0 ${D.w} ${D.h}`);
-svg.setAttribute('width',D.w);svg.setAttribute('height',D.h);
+/* Both views are laid out at D.w and drawn at the width the page gives them, CW.
+   The timeline stretches only its year scale, X(): nodes move apart and never
+   together, so lanes packed collision-free at D.w stay that way, and text and circles
+   keep their size. Clustering fits its layout to CW instead (FR.w). Below D.w nothing
+   shrinks - the drawing keeps D.w and the scroller scrolls, as it always has. */
+const SCR=document.querySelector('.scroller');
+const TX0=D.ticks[0].x, TX1=D.ticks[D.ticks.length-1].x;
+let CW=D.w, XK=1;
+const X=x=>TX0+(x-TX0)*XK;
+function measure(){
+  CW=Math.max(D.w,Math.floor(SCR?SCR.clientWidth:0));
+  XK=(CW-(D.w-TX1)-TX0)/(TX1-TX0);
+}
+measure();
+svg.setAttribute('viewBox',`0 0 ${CW} ${D.h}`);
+svg.setAttribute('width',CW);svg.setAttribute('height',D.h);
 
 const L=D.layout;
 const gB=el('g',{});svg.appendChild(gB);          /* band grounds + labels */
@@ -56,8 +70,8 @@ D.ticks.forEach(t=>{
   t._line=el('line',{x1:t.x,y1:D.axis_top+4,x2:t.x,stroke:brk?'#584e51':'#2b2529',
     'stroke-width':brk?1.6:1,opacity:brk?.9:.85});
   gG.appendChild(t._line);
-  const l=el('text',{x:t.x,y:D.axis_top-4,class:'tick'+(t.major?' major':''),'text-anchor':'middle'});
-  l.textContent=t.year;gG.appendChild(l);
+  t._lab=el('text',{x:t.x,y:D.axis_top-4,class:'tick'+(t.major?' major':''),'text-anchor':'middle'});
+  t._lab.textContent=t.year;gG.appendChild(t._lab);
 });
 
 /* vocabulary layer sits beneath citations: dashed so it never reads as "A cited B" */
@@ -122,21 +136,25 @@ function applySizes(){
   const sz=document.getElementById('szw');
   if(sz)sz.textContent=UNIFORM?'are all one size':'size is the global citation count';
 }
-/* The switch belongs to both views, so rather than a row of its own it lives in
-   whichever mode's control row is showing — beside expand/collapse in the timeline,
+/* The size switch belongs to both views, so rather than a row of its own it lives in
+   whichever mode's control row is showing — beside the banding in the timeline,
    beside colour in clustering. Moved, not duplicated: one element, one state, and
-   no pair of labels that can drift apart. It goes BEFORE the row's note, which is
-   pushed right by margin-left:auto and would otherwise end up mid-row. */
+   no pair of labels that can drift apart. Each row keeps its switches in one centred
+   group, and the size switch joins the end of it. */
 function placeSize(){
-  const note=document.getElementById(MODE==='cluster'?'ccn':'bcn');
-  const b=document.getElementById('sizesw');
-  if(note&&b&&note.parentNode)note.parentNode.insertBefore(b,note);
+  document.getElementById(MODE==='cluster'?'clsw':'tlsw').appendChild(document.getElementById('sizesw'));
 }
-document.getElementById('sizesw').addEventListener('click',e=>{
-  UNIFORM=!UNIFORM;
-  e.currentTarget.textContent='size: '+(UNIFORM?'uniform':'citations');
-  applySizes();
-});
+/* A two-way switch drawn like the view switch: pressing the side that is not lit
+   lights it and reports its value. Its own class, .tsw - every .msw is bound to the
+   view switch. */
+function segSwitch(id,pick){
+  const g=document.getElementById(id),bs=[...g.querySelectorAll('.tsw')];
+  bs.forEach(b=>b.addEventListener('click',()=>{
+    if(b.getAttribute('aria-pressed')==='true')return;
+    bs.forEach(o=>o.setAttribute('aria-pressed',String(o===b)));
+    pick(b.dataset.v);}));
+}
+segSwitch('sizesw',v=>{UNIFORM=v==='uniform';applySizes();});
 
 /* vertical layout lives here, not in the payload, because collapsing a band moves
    every band below it */
@@ -148,7 +166,8 @@ function relayout(){
     const h=open?s.lanes*L.lane_h:L.collapsed_h;
     const top=y+L.label_h;
     s._top=top;s._h=h;s._open=open;
-    s._bg.setAttribute('y',top-6);s._bg.setAttribute('height',h+12);
+    s._bg.setAttribute('y',top-6);s._bg.setAttribute('height',h+12);s._bg.setAttribute('width',CW);
+    s._hit.setAttribute('width',CW);
     s._lbl.setAttribute('y',y+16);
     s._lbl.textContent=(open?'▾ ':'▸ ')+s.name;
     s._note.setAttribute('y',y+16);
@@ -162,14 +181,15 @@ function relayout(){
   if(bcn)bcn.textContent=shut===0?'all '+SEC.length+' sections open'
         :(shut===SEC.length?'all '+SEC.length+' sections collapsed':(SEC.length-shut)+' of '+SEC.length+' open');
   const H=y+10;
-  svg.setAttribute('viewBox',`0 0 ${D.w} ${H}`);svg.setAttribute('height',H);
-  D.ticks.forEach(t=>t._line.setAttribute('y2',H-6));
+  svg.setAttribute('viewBox',`0 0 ${CW} ${H}`);svg.setAttribute('width',CW);svg.setAttribute('height',H);
+  D.ticks.forEach(t=>{const x=X(t.x);t._line.setAttribute('x1',x);t._line.setAttribute('x2',x);
+    t._line.setAttribute('y2',H-6);t._lab.setAttribute('x',x);});
   D.nodes.forEach(n=>{
     const s=secOf[n.section];
     /* _x is the position the link layers read. Here it is the year scale; in
        clustering mode the simulation overwrites it, which is the whole of the
        difference between the two views. */
-    n._x=n.x;
+    n._x=X(n.x);
     n._y = s._open ? s._top+(n.lane+0.5)*L.lane_h : s._top+L.collapsed_h/2;
     n._c.setAttribute('cx',n._x);
     n._c.setAttribute('cy',n._y);n._c.setAttribute('display',s._open?'':'none');
@@ -221,13 +241,14 @@ ROLES.forEach(r=>{
 const BF=document.getElementById('bandfacet');
 Object.keys(D.bands).forEach(f=>{
   const b=document.createElement('button');
-  b.className='bc bf';b.dataset.f=f;
-  b.textContent=f+' ['+D.bands[f].sections.length+']';
+  b.className='tsw';b.dataset.f=f;
+  b.innerHTML=esc(f)+' <span class="tn">'+D.bands[f].sections.length+'</span>';
+  b.title=D.bands[f].sections.length+' bands';
   b.setAttribute('aria-pressed',f===BAND?'true':'false');
   b.addEventListener('click',()=>{
     if(BAND===f)return;
     BAND=f;
-    BF.querySelectorAll('.bf').forEach(x=>x.setAttribute('aria-pressed',x.dataset.f===f?'true':'false'));
+    BF.querySelectorAll('.tsw').forEach(x=>x.setAttribute('aria-pressed',x.dataset.f===f?'true':'false'));
     buildBands();relayout();apply();
   });
   BF.appendChild(b);
@@ -346,7 +367,20 @@ QC.addEventListener('click',()=>{QI.value='';q='';QC.hidden=true;apply();QI.focu
    already clears the query instead. */
 document.addEventListener('keydown',ev=>{
   if(ev.key==='Escape'&&ev.target!==QI)deselect();
+  /* "/" focuses the search, as the box's key hint says, unless something is being typed */
+  if(ev.key==='/'&&!ev.ctrlKey&&!ev.metaKey&&!/^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)){
+    ev.preventDefault();QI.focus();}
 });
+/* The key is folded away by default, so the map starts nearer the top. Whether a
+   reader keeps it open is remembered in this browser only, and storage that throws
+   (a private window, a sandboxed preview) just means it starts folded. */
+(()=>{const kb=document.getElementById('keyb'),lg=document.getElementById('legend');
+  const show=open=>{lg.hidden=!open;kb.setAttribute('aria-expanded',String(open));
+    kb.textContent=(open?'[−]':'[+]')+' key';};
+  let open=false;try{open=localStorage.getItem('mtg.key')==='open';}catch(e){}
+  show(open);
+  kb.addEventListener('click',()=>{const o=lg.hidden;show(o);
+    try{localStorage.setItem('mtg.key',o?'open':'closed');}catch(e){}});})();
 q=QI.value.trim().toLowerCase();QC.hidden=!q;   /* value survives a republish */
 document.getElementById('expall').addEventListener('click',()=>{SEC.forEach(s=>collapsed[s.name]=false);relayout();});
 document.getElementById('colall').addEventListener('click',()=>{SEC.forEach(s=>collapsed[s.name]=true);relayout();});
@@ -557,3 +591,49 @@ styleVoc();
 paint();
 scrubTo(D.nodes.length);
 if(/cluster/i.test(location.hash||''))setMode('cluster');
+/* A two-second replay of the library's growth, so the map reads as building itself
+   back up: once after the app has rebuilt it, and on every change of view. Timed by
+   the clock, on a timer rather than animation frames - a hidden tab gets no frames,
+   and would be left showing half the library - so it always finishes, and is dropped
+   the moment the reader takes the slider or the play button. Skipped for readers who
+   ask for reduced motion. */
+let buildF=null;
+function buildUp(ms){
+  if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  stop();clearTimeout(buildF);
+  const N=D.nodes.length,t0=performance.now();
+  scrubTo(1);
+  const step=()=>{
+    const f=Math.min(1,(performance.now()-t0)/ms),k=Math.max(1,Math.round((1-Math.pow(1-f,2))*N));
+    if(k!==tmax)scrubTo(k);
+    buildF=f<1?setTimeout(step,30):null;
+  };
+  buildF=setTimeout(step,30);
+}
+const endBuild=()=>{clearTimeout(buildF);buildF=null;};
+SC.addEventListener('input',endBuild);
+PLAY.addEventListener('click',endBuild);   /* after play's own handler, so play carries on from here */
+let shownMode=document.body.dataset.mode;
+document.querySelectorAll('.msw').forEach(b=>b.addEventListener('click',()=>{
+  if(document.body.dataset.mode!==shownMode){shownMode=document.body.dataset.mode;buildUp(2000);}}));
+/* app.js leaves this flag behind when an update has just rewritten the map */
+try{if(sessionStorage.getItem('mtg.rebuilt')){sessionStorage.removeItem('mtg.rebuilt');buildUp(2000);}}catch(e){}
+
+/* A new width re-fits both views. The timeline re-reads X(); clustering re-fits the
+   physics it already ran, which is quick and deterministic, so nothing is simulated
+   again. Mid-transition it waits: the glide's own finish draws the result. The
+   scroller is watched rather than the window, because the page's own scrollbar
+   arriving narrows it without any window resize. Its width never depends on the
+   drawing inside it, so redrawing cannot feed back into another resize. */
+let rsz=null;
+const refit=()=>{clearTimeout(rsz);rsz=setTimeout(()=>{
+  const was=CW;measure();if(CW===was)return;
+  FR.w=CW;
+  if(settled&&!settling)fitAndCollide();
+  if(MODE==='cluster'){
+    svg.setAttribute('viewBox','0 0 '+FR.w+' '+FGH);svg.setAttribute('width',FR.w);
+    if(!settling){drawCluster();apply();}
+  }else relayout();
+  if(selected)sel(selected);
+},120);};
+if(window.ResizeObserver&&SCR)new ResizeObserver(refit).observe(SCR);else addEventListener('resize',refit);

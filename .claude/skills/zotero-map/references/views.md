@@ -18,7 +18,7 @@ was read in.
 | citations | drawn, bowed | drawn straight, centre to centre |
 | vocabulary | drawn dashed | drawn dashed, thinner and fainter |
 | direction | free from the x-axis: edges point left | colour on selection: red cites, green cited-by |
-| controls | band-by facet, expand/collapse | re-settle, colour by role or year |
+| controls | band-by facet, expand/collapse | colour by role or year |
 
 Search, the role filters, the growth scrubber and the detail panel are shared and
 survive a mode switch, including the current selection.

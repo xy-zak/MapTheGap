@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MapTheGap Tagging</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="/app/map.css">
+<link rel="stylesheet" href="/app/app.css">
+</head>
+<body data-page="tagging">
+<div class="wrap">
+<div class="bar"><span class="t">ZOTERO :: CITATION MAP :: TAGGING</span>
+  <span class="nav"><a class="m" href="/">[← map]</a><a class="m" href="/citations">[citations]</a><a class="m" href="/setup">[settings]</a></span></div>
+<div class="steps">
+
+  <section class="step">
+    <span class="no">00</span>
+    <div>
+      <h2>What the tags are for</h2>
+      <p>The map reads prefixed tags from Zotero in three ways:</p>
+      <ul>
+        <li><b>Timeline bands.</b> <code>subject:</code>, <code>question:</code> and <code>approach:</code> each split the timeline into swimlanes. A source sits in the band of its rarest tag.</li>
+        <li><b>Vocabulary links.</b> Sources that share most of those tags get a faint dashed line, where no citation already joins them.</li>
+        <li><b>Cluster names.</b> Each community is named after its most distinctive tag, <code>evidence:</code> included.</li>
+      </ul>
+      <p class="dim">Untagged items still map, just in one band with no vocabulary links.</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <span class="no">01</span>
+    <div>
+      <h2>The four facets</h2>
+      <p>Ask the four questions in order, and <b>stop when you run out of answers</b>.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>facet</th><th>the question it answers</th><th>per item</th><th>in your library</th></tr></thead>
+        <tbody>
+          <tr><td><code>subject:</code></td><td>What is it <i>about</i>?</td><td>one or two</td><td class="ex" data-f="subject:"></td></tr>
+          <tr><td><code>question:</code></td><td>What <i>problem</i> does it address?</td><td>two or three</td><td class="ex" data-f="question:"></td></tr>
+          <tr><td><code>approach:</code></td><td>What <i>tradition or technique</i> do the authors work with?</td><td>one or two</td><td class="ex" data-f="approach:"></td></tr>
+          <tr><td><code>evidence:</code></td><td>What kind of <i>claim</i> can it support?</td><td>usually one</td><td class="ex" data-f="evidence:"></td></tr>
+        </tbody>
+      </table></div>
+      <ul>
+        <li>Aim for about <b>six tags</b> per item: under three is too thin, over nine is a list.</li>
+        <li><code>subject: cross-cutting</code> is for items that span subjects, or are purely about method.</li>
+        <li><code>approach:</code> is the tradition the authors work in, not everything they cite.</li>
+        <li><code>evidence:</code> is the argument, not the format. A starting set: <code>conceptual</code> · <code>case study</code> · <code>comparative cases</code> · <code>systematic review</code> · <code>formal model</code> · <code>benchmark / experiments</code> · <code>quasi-experimental</code> · <code>network analysis</code> · <code>dataset / product</code> · <code>popular / secondary</code>.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="step">
+    <span class="no">02</span>
+    <div>
+      <h2>Rules that keep the vocabulary usable</h2>
+      <ul>
+        <li><b>At most 15 values per facet.</b> When one is full, merge or retire a value rather than stretching an existing one to fit.</li>
+        <li><b>Every value on at least two items.</b></li>
+        <li><b>Spell it exactly as it already exists.</b> To the map, <code>land use &amp; planning</code> and <code>land use and planning</code> are different tags.</li>
+        <li><b>Tag from the abstract or PDF</b>, not the title alone.</li>
+      </ul>
+      <div class="tbl"><table>
+        <thead><tr><th>style</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>case</td><td>lowercase, except acronyms: <code>approach: commons / CPR</code></td></tr>
+          <tr><td>length</td><td>a noun phrase of two to four words, no verbs</td></tr>
+          <tr><td>joining</td><td><code>&amp;</code>, not "and"; <code> / </code> for a pair or alternative</td></tr>
+          <tr><td>prefix</td><td>facet, colon, space, value: <code>question: collective action</code></td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <section class="step">
+    <span class="no">03</span>
+    <div>
+      <h2>Two tags you don't hand out</h2>
+      <ul>
+        <li><b><code>role:</code></b> is rewritten on every build. The exception is <code>role: contrarian</code>, a judgement that always wins, for items that argue <i>against</i> the foundational position (<a href="/citations#roles">citation info</a>).</li>
+        <li><b><code>MISSING</code></b> marks a citation with no file attached (a link-only attachment counts). Not for blog posts or recordings.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="step">
+    <span class="no">04</span>
+    <div>
+      <h2>Your vocabulary right now</h2>
+      <p id="vocab-note" class="dim">Reading the map…</p>
+      <div id="vocab" class="vocab"></div>
+    </div>
+  </section>
+
+  <section class="step">
+    <span class="no">05</span>
+    <div>
+      <h2>Tagging by hand in Zotero</h2>
+      <ol>
+        <li>Select an item, open <b>Tags</b> in the item pane and press <kbd>+</kbd>.</li>
+        <li>Type the full tag, e.g. <code>subject: forest</code>. Pick Zotero's suggestion to keep the spelling exact.</li>
+        <li>To tag many items, select them and drag them onto the tag in the <b>tag selector</b>, bottom left.</li>
+        <li>Press <b>update map</b> once the strip counts the change.</li>
+      </ol>
+      <p class="dim">Renaming a tag in the tag selector merges it everywhere, but bypasses the skill's record of retired terms.</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <span class="no">06</span>
+    <div>
+      <h2>Letting Claude tag for you</h2>
+      <p>The <code>zotero-tag</code> skill in this repo applies these rules: it reads each abstract or PDF, proposes tags, writes them to zotero.org and flags its least certain call.</p>
+      <ol>
+        <li>Start Claude Code (<code>claude</code>) <b>in the MapTheGap folder</b>, where the skills live.</li>
+        <li>Use a key with <b>write access</b>: setup step 02, or edit the key at <a href="https://www.zotero.org/settings/keys" target="_blank" rel="noopener">zotero.org/settings/keys</a>.</li>
+        <li>Ask in plain words:</li>
+      </ol>
+      <div class="prompts">
+        <div class="prompt"><p>Tag the untagged items in my library. Propose the tags first and wait for me before writing anything.</p><span class="why">the safe default</span></div>
+        <div class="prompt"><p>Tag the papers in my "Forest governance" collection.</p><span class="why">use your own collection's name</span></div>
+        <div class="prompt"><p>How should I tag "Governing the Commons"? Just tell me, don't change anything.</p><span class="why">advice only</span></div>
+        <div class="prompt"><p>What tags do I have, and which facets are close to the 15-value cap?</p><span class="why">refreshes the recorded vocabulary</span></div>
+        <div class="prompt"><p>approach: is full and I need a value for agent-based modelling. Propose a merge or a retirement to make room.</p><span class="why">waits for your yes before merging</span></div>
+        <div class="prompt"><p>Check my vocabulary: values only one item carries, untagged items, and any stray unprefixed tags.</p><span class="why">a tidy-up pass</span></div>
+        <div class="prompt"><p>Mark every item that has no PDF attached as MISSING.</p><span class="why">uses the zotero-library skill</span></div>
+      </div>
+      <p class="dim">Claude's edits reach the strip at once from zotero.org, or after a sync from the Zotero app. Then press <b>update map</b>.</p>
+    </div>
+  </section>
+
+</div>
+</div>
+<script src="/app/app.js"></script>
+<script>
+(function(){
+const {api,esc}=window.MTG;
+const $=id=>document.getElementById(id);
+const FACETS=['subject:','question:','approach:','evidence:'];
+
+api('/api/info').then(d=>{
+  if(!d.map){$('vocab-note').textContent='No map has been built yet. Once it has, the values your library carries appear here.';return;}
+  const F=d.facets;
+  document.querySelectorAll('.ex').forEach(td=>{
+    const vals=(F[td.dataset.f]||[]).slice(0,3).map(v=>esc(v[0]));
+    td.innerHTML=vals.length?vals.join(' · ')+((F[td.dataset.f]||[]).length>3?' …':''):'<span class="dim">none yet</span>';
+  });
+  $('vocab-note').innerHTML=`As of the map built ${esc(d.map.built)}: ${d.items} items, a median of ${d.median_tags} tags each`+
+    (d.untagged?`, <b>${d.untagged}</b> untagged`:'')+'. Values only one item carries are in red. For glosses and merge candidates, ask Claude <i>"what tags do I have?"</i>';
+  let h='';
+  for(const f of FACETS){
+    const vals=F[f]||[],n=vals.length,over=n>d.cap;
+    h+=`<div class="facet"><div class="fh"><code>${f}</code><span class="cnt${over?' err':''}">${n} of ${d.cap}</span>`+
+      `<span class="cap"><i style="width:${Math.min(100,n/d.cap*100)}%"${over?' class="over"':''}></i></span></div><ul>`+
+      vals.map(v=>`<li${v[1]<2?' class="one"':''}><span>${esc(v[0])}</span><b>${v[1]}</b></li>`).join('')+
+      (n?'':'<li class="dim">none yet</li>')+'</ul></div>';
+  }
+  const un=Object.entries(d.unprefixed||{});
+  if(un.length)h+=`<div class="facet"><div class="fh"><span class="dim">unprefixed</span></div><ul>`+
+    un.map(([t,c])=>`<li${t==='MISSING'?'':' class="one"'}><span>${esc(t)}</span><b>${c}</b></li>`).join('')+'</ul></div>';
+  $('vocab').innerHTML=h;
+}).catch(e=>{$('vocab-note').textContent='Couldn\'t read the map: '+e.message;});
+
+document.querySelectorAll('.prompt').forEach(el=>{
+  const b=document.createElement('button');b.type='button';b.className='lnk copy';b.textContent='[copy]';
+  b.addEventListener('click',()=>navigator.clipboard.writeText(el.querySelector('p').textContent).then(()=>{
+    b.textContent='[copied]';setTimeout(()=>{b.textContent='[copy]';},1400);}));
+  el.appendChild(b);
+});
+})();
+</script>
+</body>
+</html>
