@@ -12,6 +12,11 @@
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:8px;vertical-align:1px;
   background:var(--dimmer)}
 .dot.on{background:var(--found);box-shadow:0 0 0 3px color-mix(in srgb,var(--found) 22%,transparent)}
+/* found: read from this computer; accent: read from zotero.org; contra: Zotero is open
+   but can't be read, so zotero.org stands in */
+.dot.web{background:var(--accent)}
+.dot.warn{background:transparent;box-shadow:inset 0 0 0 1.5px var(--contra)}
+.appstrip .src.warn .lnk{color:var(--contra)}
 .appstrip .n{color:var(--fg);font-weight:500}
 .appstrip .ok{color:var(--found)}
 .appstrip .err{color:var(--contra)}
@@ -39,6 +44,8 @@
 .appdrop li:before{content:"› ";color:var(--line)}
 .appdrop pre{margin:0;white-space:pre-wrap;font:inherit;font-size:11px;color:var(--dim);line-height:1.55}
 .appdrop .note{margin-top:7px;font-size:10.5px}
+.appdrop p{margin:0 0 7px;max-width:96ch;line-height:1.55}
+.appdrop p b{color:var(--fg);font-weight:500}
 
 /* ---------------------------------------------------------------- setup page */
 .steps{border:1px solid var(--line);border-top:0}

@@ -29,12 +29,13 @@
   <section class="step">
     <span class="no">01</span>
     <div>
-      <h2>Sync Zotero to zotero.org</h2>
-      <p>The map reads your library from zotero.org rather than from the desktop app, so the desktop library has to sync there.</p>
+      <h2>Sign Zotero in, and let the map read it</h2>
+      <p>The map reads your library from the Zotero app on this computer while it is open, and from zotero.org when it isn't, so the desktop library also has to sync there.</p>
       <ol>
         <li>No account yet? <a href="https://www.zotero.org/user/register" target="_blank" rel="noopener">Create a free one</a>.</li>
         <li>In Zotero, open <kbd>Edit → Settings → Sync</kbd> (on macOS, <kbd>Zotero → Settings → Sync</kbd>), sign in, and leave <i>Sync automatically</i> on.</li>
         <li>Wait for the first sync to finish (the green arrow at the top right stops spinning).</li>
+        <li>In <kbd>Settings → Advanced</kbd>, tick <b>Allow other applications on this computer to communicate with Zotero</b>. This lets the map read the open app directly, so an edit shows up without waiting for a sync. Without it, the map reads zotero.org every time.</li>
       </ol>
       <p class="dim">File sync and attachments don't matter here. Only item data is read.</p>
     </div>

@@ -16,6 +16,7 @@ Usage:  python3 build.py [--no-fetch] [--progress]
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -44,6 +45,13 @@ KEY_FILE = os.environ.get("ZOTERO_API_CONF") or os.path.join(
 # back to the common pool - so no personal address is baked into this file.
 MAILTO = os.environ.get("ZOTERO_MAP_MAILTO", "").strip()
 USER_AGENT = f"zotero-map ({MAILTO})" if MAILTO else "zotero-map"
+# Where Zotero keeps its profiles, whose prefs.js holds a non-default server port.
+ZOTERO_PROFILES = {
+    "win32": os.path.join(os.environ.get("APPDATA", ""), "Zotero", "Zotero", "Profiles"),
+    "darwin": os.path.expanduser("~/Library/Application Support/Zotero/Profiles"),
+}.get(sys.platform, os.path.expanduser("~/.zotero/zotero"))
+ZOTERO_PORT = 23119        # Zotero's own default for its local server
+PORT_PREF = re.compile(r'user_pref\("extensions\.zotero\.httpServer\.port",\s*(\d+)\)')
 
 
 # ---------------------------------------------------------------- Zotero
@@ -101,6 +109,80 @@ def zotero_http(path, params=None, key=None, headers=None, timeout=30):
             return r.status, r.headers, r.read()
     except urllib.error.HTTPError as e:
         return e.code, e.headers, e.read()
+
+
+def zotero_port():
+    """Zotero's local server port: its own default unless a profile's prefs.js changes it."""
+    try:
+        profiles = os.listdir(ZOTERO_PROFILES)
+    except OSError:
+        return ZOTERO_PORT
+    for name in sorted(profiles):
+        try:
+            with open(os.path.join(ZOTERO_PROFILES, name, "prefs.js"), encoding="utf-8",
+                      errors="replace") as fh:
+                m = PORT_PREF.search(fh.read())
+        except OSError:
+            continue
+        if m:
+            return int(m.group(1))
+    return ZOTERO_PORT
+
+
+# No proxy for 127.0.0.1. urllib reads the system proxy settings on Windows and macOS,
+# and a proxy answering for 127.0.0.1 would read as Zotero answering.
+LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def zotero_local_http(path, params=None, headers=None, timeout=60):
+    """GET from the local API of the Zotero desktop app. Same contract as zotero_http.
+
+    The local API (Zotero 7 and later, off until "Allow other applications on this
+    computer to communicate with Zotero" is ticked in Settings > Advanced) answers the
+    Web API's read requests from the zotero.sqlite the app has open, through Zotero
+    itself - so nothing here reads the database file, and nothing waits for a sync.
+
+    No API key is sent: the local API needs none, and the key goes only to zotero.org.
+    A response without Zotero's own Zotero-API-Version header comes back as status 0,
+    so whatever else might be listening on the port is never read as the library.
+    """
+    url = f"http://127.0.0.1:{zotero_port()}/api/" + path
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={
+        "Zotero-API-Version": "3", "User-Agent": USER_AGENT, **(headers or {})})
+    try:
+        with LOCAL_OPENER.open(req, timeout=timeout) as r:
+            status, hdrs, body = r.status, r.headers, r.read()
+    except urllib.error.HTTPError as e:
+        status, hdrs, body = e.code, e.headers, e.read()
+    if not (hdrs and hdrs.get("Zotero-API-Version")):
+        return 0, hdrs, body
+    return status, hdrs, body
+
+
+def zotero_local_problem(user_id, timeout=10):
+    """None when the local API serves this user's library, else why it doesn't.
+
+    The path names the real user id, not the local API's alias 0, so that Zotero
+    itself refuses when it is signed in to a different account - or to none - and
+    the map is never built from someone else's library.
+    """
+    try:
+        status, _, body = zotero_local_http(f"users/{user_id}/items/top",
+                                            {"limit": 1, "format": "keys"}, timeout=timeout)
+    except (urllib.error.URLError, OSError):
+        return "Zotero is not running"
+    if status == 200:
+        return None
+    if status == 403:
+        return ("its local API is off - tick 'Allow other applications on this computer "
+                "to communicate with Zotero' in Zotero's Settings > Advanced")
+    if status == 400 and b"logged-in user" in body:
+        return "Zotero on this computer is signed in to a different account, or to none"
+    if status in (0, 404):
+        return "no local API answered - it needs Zotero 7 or later"
+    return f"its local API answered HTTP {status}"
 
 
 def _zotero_json(path, params, what, timeout):
@@ -234,6 +316,10 @@ def _zotero_cache_name(path, params):
     return re.sub(r"[^A-Za-z0-9.,=~_-]", "_", f"{path}~{slug}" if slug else path) + ".json"
 
 
+class LocalGone(Exception):
+    """The Zotero app's local API stopped serving the library partway through a run."""
+
+
 class Fetcher:
     """Every outbound call, plus the per-run state they accumulate.
 
@@ -246,10 +332,15 @@ class Fetcher:
     USER_AGENT) stays at module scope, where it reads as configuration.
     """
 
-    def __init__(self, user_id, no_fetch, progress=no_progress):
+    def __init__(self, user_id, no_fetch, progress=no_progress, source="web"):
         self.user_id = user_id
         self.no_fetch = no_fetch
         self.progress = progress
+        # Where the library is read from: "local", the Zotero desktop app's local API,
+        # or "web", zotero.org. After each zotero_all call it is the source of the rows
+        # that call returned, which pull() records next to the library version, since
+        # the two sources count versions differently - see zotero_all.
+        self.source = source
         # Outbound reference-list calls made so far. A loop reads it before and after
         # each item to report whether that item cost a network round trip.
         self.net_calls = 0
@@ -265,7 +356,14 @@ class Fetcher:
 
     @classmethod
     def connect(cls, no_fetch, progress=no_progress):
-        """Resolve the library's user id, from the recorded copy when offline.
+        """Resolve the library's user id, and choose where to read the library from.
+
+        Local first: when the recorded id is one the Zotero app on this computer is
+        signed in to and serving through its local API, that is the whole connection
+        and zotero.org is not contacted. Otherwise /keys/current names the key's owner,
+        and the local API is tried again for that id - a first run has nothing
+        recorded, and the recorded id may be from a key since replaced - before
+        falling back to the Web API.
 
         Only the integer id is ever written to disk. The /keys/current response
         echoes the API key back in plaintext, so it is never cached and never
@@ -277,12 +375,34 @@ class Fetcher:
             if hit is None:
                 raise _need_recorded(cache)
             return cls(hit, no_fetch, progress)
+        recorded = _cache_read(cache, "the Zotero user id")
+        if recorded is not None and zotero_local_problem(recorded) is None:
+            print("zotero: reading the library from Zotero on this computer")
+            return cls(recorded, no_fetch, progress, "local")
         user_id = _zotero_json("keys/current", None, "the API key owner", 30)["userID"]
         _cache_write(cache, user_id)
+        problem = zotero_local_problem(user_id)
+        if problem is None:
+            print("zotero: reading the library from Zotero on this computer")
+            return cls(user_id, no_fetch, progress, "local")
+        print(f"zotero: reading the library from zotero.org ({problem})")
         return cls(user_id, no_fetch, progress)
 
     def zotero(self, path, **params):
         return _zotero_json(f"users/{self.user_id}/{path}", params, path, 60)
+
+    def zotero_local(self, path, **params):
+        """A local API call, or LocalGone when the app stops serving the library."""
+        try:
+            status, _, body = zotero_local_http(f"users/{self.user_id}/{path}", params)
+        except (urllib.error.URLError, OSError) as e:
+            raise LocalGone(f"stopped answering: {getattr(e, 'reason', e)}")
+        if status != 200:
+            raise LocalGone(f"answered HTTP {status}" if status else "stopped answering")
+        try:
+            return json.loads(body)
+        except ValueError:
+            raise LocalGone("returned a non-JSON body")
 
     def zotero_all(self, path, **params):
         """Every row of a Zotero endpoint, following pagination, and recorded to cache.
@@ -301,6 +421,17 @@ class Fetcher:
         this it still made three live calls, so the flag could not be used offline at
         all despite saying "never hit the network".
 
+        The recording carries its source along with the rows. An item's `version`
+        means something different in each: zotero.org counts synced changes, while
+        recent Zotero versions count local edits in the local API, with no relation
+        between the two numbers. A version is only comparable with others from the
+        same source, so the source has to travel with the rows. A recording from
+        before sources were tracked is a bare list, and came from zotero.org.
+
+        When the local API stops answering partway through a run - Zotero was quit -
+        this endpoint is read again in full from zotero.org, and so is every endpoint
+        after it, so no single recording mixes rows from both.
+
         The cache file is named for the path AND the query - see
         _zotero_cache_name, which exists because naming it for the path alone let two
         different queries share one file.
@@ -311,15 +442,32 @@ class Fetcher:
             hit = _cache_read(cache, "the recorded Zotero " + path)
             if hit is None:
                 raise _need_recorded(cache)
-            return hit
+            if isinstance(hit, list):
+                self.source = "web"
+                return hit
+            self.source = hit["source"]
+            return hit["rows"]
+        rows = None
+        if self.source == "local":
+            try:
+                rows = self._pages(self.zotero_local, path, limit, params)
+            except LocalGone as e:
+                print(f"zotero: Zotero on this computer {e} - reading {path} from zotero.org")
+                self.source = "web"
+        if rows is None:
+            rows = self._pages(self.zotero, path, limit, params)
+        _cache_write(cache, {"source": self.source, "rows": rows})
+        return rows
+
+    @staticmethod
+    def _pages(get, path, limit, params):
         rows, start = [], 0
         while True:
-            page = self.zotero(path, start=start, limit=limit, **params)
+            page = get(path, start=start, limit=limit, **params)
             rows += page
             if len(page) < limit:
                 break
             start += limit
-        _cache_write(cache, rows)
         return rows
 
     # ------------------------------------------------------- external APIs
@@ -432,23 +580,49 @@ def norm_arxiv(*fields):
     return None
 
 
+FINGERPRINT_FIELDS = ("itemType", "title", "date", "dateAdded", "DOI", "archiveID", "url",
+                      "extra", "abstractNote")
+
+
+def item_fingerprint(d):
+    """A short hash of the fields of a Zotero item's data that a build reads.
+
+    app.py compares it with the library to say what has changed since a map was
+    built, and the comparison has to hold across sources: the Zotero app's local API
+    and zotero.org number versions differently, but serve the same field values. So
+    no version or dateModified goes in, only what resolve_identity reads - the
+    fields above, the first three creators' names, the tags and the collections,
+    those two sorted because their order is not part of the item. An edit the map
+    cannot show, a note's text or a URL's access date, changes nothing here.
+    """
+    sig = {f: d.get(f) or "" for f in FINGERPRINT_FIELDS}
+    sig["creators"] = [c.get("lastName") or c.get("name") or "" for c in d.get("creators", [])][:3]
+    sig["tags"] = sorted(t["tag"] for t in d.get("tags", []))
+    sig["collections"] = sorted(d.get("collections", []))
+    return hashlib.sha1(json.dumps(sig, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+
+
 def pull(fetch):
     """The library, minus notes, attachments and anything in the trash.
 
     Also returns the highest item version in the pull. It is the high-water mark the
-    map was built from: app.py asks Zotero for items?since=<it> to count what has
-    changed since, and since it comes from the pull itself it stays right for a
+    map was built from: app.py takes the map's nodes as that source's library as of
+    it, and asks only for items?since=<it>. Since it comes from the pull itself it stays right for a
     --no-fetch build of an older recording. Taken over the raw rows, trash and notes
     included, because a change to any of them is a change this build has seen.
+
+    And returns the source the items came from, "local" or "web", because a version
+    can only be compared with versions from the same source; app.py asks that one.
     """
     fetch.progress(p="stage", stage="pull")
     raw = fetch.zotero_all("items", limit=100, itemType="-attachment")
+    source = fetch.source      # read before the next call, which may fall back to the web
     items = [i["data"] for i in raw
              if i["data"]["itemType"] not in ("note", "attachment")
              and not i["data"].get("deleted")]
     colls = {c["data"]["key"]: c["data"]["name"] for c in fetch.zotero_all("collections", limit=50)}
     print(f"pulled {len(items)} items, {len(colls)} collections")
-    return items, colls, max((i.get("version") or 0 for i in raw), default=0)
+    return items, colls, max((i.get("version") or 0 for i in raw), default=0), source
 
 
 def resolve_identity(fetch, items, colls, AL):
@@ -504,6 +678,7 @@ def resolve_identity(fetch, items, colls, AL):
             "abstract": (it.get("abstractNote") or "").strip(),
             "stored_role": next((t.split(": ", 1)[1] for t in tags if t.startswith("role: ")), None),
             "unresolved": AL["unresolvable"].get(k) or err,
+            "zfp": item_fingerprint(it),
         }
     return nodes, oa_by_key
 
@@ -708,12 +883,13 @@ def tag_affinity(nodes, edges):
     return tag_edges, TAG_MIN
 
 
-def emit(nodes, edges, tag_edges, threshold, tag_min, library_version):
+def emit(nodes, edges, tag_edges, threshold, tag_min, library_version, library_source):
     """Write out/graph.json and summarise the run."""
     graph = {
         "generated": time.strftime("%Y-%m-%d"),
         # provenance, not a computed value: the pull this graph was built from
         "library_version": library_version,
+        "library_source": library_source,
         "affinity": list(AFFINITY),
         "tag_edges": tag_edges,
         "tag_min": tag_min,
@@ -765,7 +941,7 @@ def main():
     with open(os.path.join(HERE, "aliases.json"), encoding="utf-8") as fh:
         AL = json.load(fh)
 
-    items, colls, library_version = pull(fetch)
+    items, colls, library_version, library_source = pull(fetch)
     nodes, oa_by_key = resolve_identity(fetch, items, colls, AL)
     refs, doi_refs, arxiv_refs, fallbacks, missing = fetch_references(fetch, nodes, oa_by_key)
     report_fetch(fetch, refs, fallbacks, missing)
@@ -773,7 +949,7 @@ def main():
     edges, indeg, outdeg = build_edges(nodes, refs, doi_refs, arxiv_refs, AL)
     threshold = classify(nodes, indeg, outdeg)
     tag_edges, tag_min = tag_affinity(nodes, edges)
-    emit(nodes, edges, tag_edges, threshold, tag_min, library_version)
+    emit(nodes, edges, tag_edges, threshold, tag_min, library_version, library_source)
 
 
 if __name__ == "__main__":

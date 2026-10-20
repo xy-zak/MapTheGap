@@ -27,41 +27,63 @@ function Strip(host,mode,onDone){
     if(dropFor===kind){drop.hidden=true;dropFor=null;return;}
     dropFor=kind;drop.innerHTML=html;drop.hidden=false;
   }
+  const SRC={local:'Zotero on this computer',web:'zotero.org'};
   function changesHtml(c){
     const sec=(h,l)=>l.length?`<h4>${h} · ${l.length}</h4><ul>${l.slice(0,60).map(i=>
       `<li>${esc(i.title||i.key)}</li>`).join('')}${l.length>60?`<li>… ${l.length-60} more</li>`:''}</ul>`:'';
     return sec('new',c.added)+sec('edited',c.edited)+sec('removed',c.removed)+
-      `<div class="note">counted from zotero.org at ${esc(c.checked)} - an edit shows here once Zotero has synced it</div>`;
+      (c.source==='local'
+        ?`<div class="note">counted from Zotero on this computer at ${esc(c.checked)}, edits not yet synced included</div>`
+        :`<div class="note">counted from zotero.org at ${esc(c.checked)} - an edit made in the Zotero app counts once Zotero has synced it</div>`);
+  }
+  /* The plain-words answer to "where is this coming from", behind the source item. */
+  function srcHtml(s){
+    const r=s.reading||{},m=s.map;
+    let now;
+    if(r.source==='local')now='<p><b>Zotero on this computer.</b> Zotero is open and lets other applications read it, '+
+      'so the map reads it directly: an edit counts here within a minute, before Zotero has synced it, '+
+      'and <i>update map</i> reads from here too.</p>';
+    else if(!s.zotero_open)now='<p><b>zotero.org.</b> Zotero isn\'t open on this computer, so the map reads the copy '+
+      'of your library that Zotero syncs online. Edits made on zotero.org, on another computer or by the Claude skills count straight away; '+
+      'an edit made in the Zotero app counts once Zotero has synced it. Open Zotero to read it directly.</p>';
+    else now=`<p><b>zotero.org,</b> although Zotero is open: ${esc(r.why)}. Until that is fixed, the map reads the copy `+
+      'Zotero syncs online, and an edit made in the Zotero app counts once Zotero has synced it.</p>';
+    return '<h4>reading your library from</h4>'+now+
+      (m?`<h4>this map</h4><p>built ${esc(m.built)} from ${SRC[m.source]||esc(m.source)}. `+
+        'Changes are counted against it from whichever of the two can be read, item by item, so switching between them loses nothing.</p>':'');
   }
   function logHtml(text){return `<pre>${esc(text||'(nothing yet)')}</pre>`;}
 
   function idle(){
     const s=status||{};
     const c=s.changes||{};
-    let z, ch='';
-    if(!s.zotero_open){
-      z='<span class="dot"></span>zotero closed';
-      ch='<span class="dim">open Zotero to check for changes</span>';
-    }else{
-      z='<span class="dot on"></span>zotero open';
-      if(c.state==='ok'&&c.count>0){
-        const parts=[['new',c.added],['edited',c.edited],['removed',c.removed]]
-          .filter(p=>p[1].length).map(p=>p[1].length+' '+p[0]);
-        ch=`<span class="n">${c.count}</span> item${c.count===1?'':'s'} changed since this map was built`+
-           ` <span class="dim">(${parts.join(' · ')})</span><button class="lnk" data-a="show">[show]</button>`;
-      }else if(c.state==='ok')ch='<span class="ok">map is up to date with your library</span>';
-      else if(c.state==='untracked')ch='update the map once to start tracking changes';
-      else if(c.state==='error')ch=`<span class="err">couldn't check for changes: ${esc(c.error)}</span>`;
-      else ch='checking for changes…';
-    }
-    const hot=s.zotero_open&&c.state==='ok'&&c.count>0;
-    row.innerHTML=`<span class="it">${z}</span><span class="it grow">${ch}</span>`+
+    const r=s.reading||{};
+    const where=SRC[r.source]||'zotero.org';
+    const z=r.source==='local'
+      ?'<span class="dot on"></span>reading zotero app'
+      :`<span class="dot ${s.zotero_open?'warn':'web'}"></span>reading zotero.org`;
+    const why=r.source==='local'?'Zotero is open: the map reads it directly, unsynced edits included'
+      :s.zotero_open?('Zotero is open, but '+r.why):'Zotero is closed: the map reads your synced library on zotero.org';
+    let ch;
+    if(c.state==='ok'&&c.count>0){
+      const parts=[['new',c.added],['edited',c.edited],['removed',c.removed]]
+        .filter(p=>p[1].length).map(p=>p[1].length+' '+p[0]);
+      ch=`<span class="n">${c.count}</span> item${c.count===1?'':'s'} changed since this map was built`+
+         ` <span class="dim">(${parts.join(' · ')})</span><button class="lnk" data-a="show">[show]</button>`;
+    }else if(c.state==='ok')ch=`<span class="ok">map is up to date with ${SRC[c.source]}</span>`+
+      (c.source==='web'?' <span class="dim">as of its last sync</span>':'');
+    else if(c.state==='untracked')ch='update the map once to start tracking changes';
+    else if(c.state==='error')ch=`<span class="err">couldn't check ${where} for changes: ${esc(c.error)}</span>`;
+    else ch=`checking ${where} for changes…`;
+    const hot=c.state==='ok'&&c.count>0;
+    row.innerHTML=`<span class="it src${r.source!=='local'&&s.zotero_open?' warn':''}" title="${esc(why)}">${z}<button class="lnk" data-a="src">[?]</button></span>`+
+      `<span class="it grow">${ch}</span>`+
       `<a class="bc" href="/setup" title="Zotero key and contact address">settings</a>`+
       `<button class="bc" data-a="quit" title="stop the app; the map on this page stays readable">quit</button>`+
-      `<button class="bc${hot?' hot':''}" data-a="update">[↻] update map</button>`;
+      `<button class="bc${hot?' hot':''}" data-a="update" title="rebuild the map, reading the library from ${esc(where)}">[↻] update map</button>`;
     if(dropFor==='changes'){
       if(c.state==='ok'&&c.count)drop.innerHTML=changesHtml(c);else{drop.hidden=true;dropFor=null;}
-    }
+    }else if(dropFor==='src')drop.innerHTML=srcHtml(s);
   }
 
   function running(r){
@@ -118,6 +140,7 @@ function Strip(host,mode,onDone){
     const a=e.target.closest('[data-a]');if(!a)return;
     const act=a.dataset.a;
     if(act==='show')showDrop('changes',changesHtml(status.changes));
+    else if(act==='src')showDrop('src',srcHtml(status||{}));
     else if(act==='log')api('/api/update?log=1').then(r=>showDrop('log',logHtml(r.log)));
     else if(act==='dismiss'){dismissed=true;drop.hidden=true;dropFor=null;draw();}
     else if(act==='cancel'){a.disabled=true;api('/api/update/cancel',{}).then(r=>{run=r;draw();});}

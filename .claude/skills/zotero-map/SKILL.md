@@ -51,8 +51,13 @@ and Linux.
   an HTTPS certificate, the person needs to run *Install Certificates.command* in
   *Applications → Python 3.x* once. It is not a network problem; retrying won't help.
 
-Nothing reads `zotero.sqlite`. The library is reached over the Web API, so the local
-Zotero install is never touched.
+The library is read local-first. When the Zotero app is open, its local API is on
+(*Settings → Advanced → Allow other applications on this computer to communicate with
+Zotero*), and it is signed in to the key's account, `build.py` reads the app and makes
+no zotero.org call. Otherwise it reads the Web API. The build's first line names the
+source and, on a fallback, why. Nothing opens `zotero.sqlite` directly. The local API
+is read-only as far as this repo is concerned: the zotero-library and zotero-tag
+skills still write through the Web API.
 
 ## Pointing it at a different library
 

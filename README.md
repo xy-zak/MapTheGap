@@ -30,12 +30,18 @@ The app runs at `http://127.0.0.1:8765`, or the next free port if something else
 holds that one. The first visit is a setup page that
 walks through syncing Zotero, creating a read-only API key and linking it, then builds
 the first map. After that the page is the map itself, with one extra strip above the
-title: whether Zotero is open, how many items have changed since the map was built
-(new, edited, removed, with titles behind `[show]`), and an **update map** button that
-shows each stage, a progress bar and the time left.
+title: where the library is being read from (*reading zotero app* or *reading
+zotero.org*, with the reason behind `[?]`), how many items have changed since the map
+was built (new, edited, removed, with titles behind `[show]`), and an **update map**
+button that shows each stage, a progress bar and the time left.
 
-The change count comes from the Zotero Web API, so an edit counts once Zotero has
-synced it. The time estimate is learned: each finished update records how long every
+Changes are counted from whichever source can be read now, whichever the map was
+built from. While Zotero is open with its local API on (see Requirements), that is the
+Zotero app, and an edit counts as soon as it is made. Otherwise it is zotero.org, where
+an edit made in the Zotero app counts once Zotero has synced it, and one made on
+zotero.org, another computer or by the skills counts at once. Items are compared with
+the map one by one, on the fields the map shows, so moving between the two loses
+nothing; an edit the map cannot show is not counted. The time estimate is learned: each finished update records how long every
 stage took on this machine in `cache/app/timings.json`, and the next one starts from
 that.
 
@@ -102,9 +108,15 @@ including the current selection.
   ```
 
   On macOS and Linux keep it at mode `600`; on Windows your profile folder is
-  already private to your account. **Never put it inside this repo.** Nothing here
-  reads `zotero.sqlite`. The library is reached over the Web API, so your local
-  Zotero install and its database are never touched.
+  already private to your account. **Never put it inside this repo.**
+- **Zotero's local API** *(optional, recommended)*. In Zotero 7 or later, tick
+  *Allow other applications on this computer to communicate with Zotero* in
+  *Settings → Advanced*. While Zotero is open the library is then read from the
+  desktop app itself, so edits count before they have synced and no request goes to
+  zotero.org. The local API serves only the account Zotero is signed in to, and that
+  account must match the key. If it doesn't, or Zotero is closed, or the setting is
+  off, the build reads zotero.org instead and says so in its first lines. Nothing
+  here opens `zotero.sqlite` directly; the local API goes through Zotero.
 - **A contact address** *(optional, recommended)* for the OpenAlex / Semantic
   Scholar **polite pool**, which is faster and throttled less aggressively than the
   common pool. Enter it on the setup page, or for terminal runs set

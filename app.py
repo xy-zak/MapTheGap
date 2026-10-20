@@ -9,8 +9,9 @@ just opens the running app again.
 
 Serves on 127.0.0.1 only. The first visit walks through linking a Zotero Web API
 key; after that `/` is out/map.html exactly as render.py wrote it, with one strip
-appended at serve time - whether Zotero is open, what has changed in the library
-since the map was built, and an update button with progress and a time estimate.
+appended at serve time - whether the library is being read from the Zotero app on
+this computer or from zotero.org, what has changed in it since the map was built, and
+an update button with progress and a time estimate.
 
 The build itself is unchanged: build.py --progress, then render.py, as subprocesses.
 A subprocess rather than an import because build.py ends a run with SystemExit on
@@ -34,7 +35,6 @@ import threading
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
 import webbrowser
 
 import build   # KEY_FILE, the Zotero transport, the cache layout and its atomic writer
@@ -47,13 +47,6 @@ TIMINGS = os.path.join(HERE, "cache", "app", "timings.json")
 # Beside the key, outside the repo: who the key belongs to, and the optional contact
 # address for the polite pool. No secret in it, but it is per-user, like the key.
 SETTINGS = os.path.join(os.path.dirname(build.KEY_FILE), "mapthegap.json")
-# Where Zotero keeps its profiles, whose prefs.js holds a non-default server port.
-ZOTERO_PROFILES = {
-    "win32": os.path.join(os.environ.get("APPDATA", ""), "Zotero", "Zotero", "Profiles"),
-    "darwin": os.path.expanduser("~/Library/Application Support/Zotero/Profiles"),
-}.get(sys.platform, os.path.expanduser("~/.zotero/zotero"))
-ZOTERO_PORT = 23119        # Zotero's own default for its connector server
-PORT_PREF = re.compile(r'user_pref\("extensions\.zotero\.httpServer\.port",\s*(\d+)\)')
 
 STATIC = {
     "/app/app.js": ("app.js", "text/javascript; charset=utf-8"),
@@ -114,6 +107,17 @@ def graph():
     return _graph_cache["graph"]
 
 
+def map_info():
+    """Where the map on screen was read from, and when it was built, for the strip."""
+    g = graph()
+    if g is None:
+        return None
+    t = time.localtime(_graph_cache["mtime"])
+    # the day without a leading zero, which strftime spells differently on Windows
+    return {"source": g.get("library_source", "web"),
+            "built": f"{t.tm_mday} {time.strftime('%b %H:%M', t)}"}
+
+
 # ---------------------------------------------------------------- Zotero
 
 class ZoteroError(Exception):
@@ -138,6 +142,22 @@ def zotero_get(path, params=None, headers=None, key=None):
     return status, hdrs, body.decode("utf-8", "replace")
 
 
+def zotero_local_get(path, params=None, headers=None):
+    """GET from the Zotero app's local API. Returns (status, headers, body text).
+
+    Same shape as zotero_get, and no key is sent. A failed connection, or anything
+    but Zotero answering, becomes a ZoteroError the page can show.
+    """
+    try:
+        status, hdrs, body = build.zotero_local_http(path, params, headers=headers,
+                                                     timeout=20)
+    except (urllib.error.URLError, OSError):
+        status = 0
+    if status == 0:
+        raise ZoteroError("Zotero on this computer isn't answering through its local API")
+    return status, hdrs, body.decode("utf-8", "replace")
+
+
 def identify(key=None):
     """Who a key belongs to, as {user_id, username, library}. Never returns the key.
 
@@ -152,11 +172,6 @@ def identify(key=None):
     d = json.loads(body)
     return {"user_id": d.get("userID"), "username": d.get("username") or "",
             "library": bool(((d.get("access") or {}).get("user") or {}).get("library"))}
-
-
-# No proxy for the ping. urllib reads the system proxy settings on Windows and macOS,
-# and a proxy answering for 127.0.0.1 would read as Zotero being open.
-_LOCAL = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def zotero_running():
@@ -185,28 +200,11 @@ def zotero_running():
         return None
 
 
-def zotero_port():
-    """Zotero's connector port: its own default unless a profile's prefs.js changes it."""
-    try:
-        profiles = os.listdir(ZOTERO_PROFILES)
-    except OSError:
-        return ZOTERO_PORT
-    for name in sorted(profiles):
-        try:
-            with open(os.path.join(ZOTERO_PROFILES, name, "prefs.js"), encoding="utf-8",
-                      errors="replace") as fh:
-                m = PORT_PREF.search(fh.read())
-        except OSError:
-            continue
-        if m:
-            return int(m.group(1))
-    return ZOTERO_PORT
-
-
 def zotero_ping():
     """Whether Zotero's connector server answers. Needs no Zotero setting turned on."""
     try:
-        _LOCAL.open(f"http://127.0.0.1:{zotero_port()}/connector/ping", timeout=0.5).close()
+        build.LOCAL_OPENER.open(f"http://127.0.0.1:{build.zotero_port()}/connector/ping",
+                                timeout=0.5).close()
         return True
     except urllib.error.HTTPError:
         return True                # something answered on Zotero's port
@@ -219,16 +217,50 @@ def zotero_open():
     return zotero_running() or zotero_ping()
 
 
+def reading_from(is_open):
+    """Where the library is read from right now, "local" or "web", and why when not local.
+
+    The same choice build.Fetcher.connect makes, so the change count and the next
+    update read the same place. Asked on every status request, so opening or closing
+    Zotero moves the strip within one poll.
+    """
+    if not is_open:
+        return {"source": "web", "why": None}
+    uid = settings().get("user_id") or _read_json(
+        os.path.join(build.CACHE_ZOTERO, "user_id.json"))
+    if not uid:
+        return {"source": "web", "why": "no Zotero user id is recorded yet"}
+    problem = build.zotero_local_problem(uid, timeout=2)
+    if not problem:
+        return {"source": "local", "why": None}
+    if problem == "Zotero is not running":   # the process is there, its server isn't
+        problem = "its local server isn't answering - it may still be starting"
+    return {"source": "web", "why": problem}
+
+
 class Changes:
-    """What has changed in the library since the pull the current map was built from.
+    """What has changed in the library since the current map was built.
 
-    `since` is graph.json's library_version - the highest item version that build
-    saw - so the answer is about the map on screen, not about the last time anyone
-    looked. Checked at most once a minute, in the background, and only while Zotero
-    is open; the check sends If-Modified-Since-Version, so a library that has not
-    moved costs one 304.
+    Asked of whichever source the library can be read from now - the Zotero app's
+    local API while Zotero is open and serving it, zotero.org otherwise - whichever
+    the map itself was read from. Each source has its own copy of the library here,
+    {key: (fingerprint, title)} as of a version, brought up to date with
+    items?since=<that version> at most once a minute, in the background. A copy is
+    compared with the map's nodes item by item, by build.item_fingerprint, so the
+    answer holds across sources: a version from one cannot be asked about at the
+    other, but the fields both serve are the same.
 
-    Counted from the Web API, so an edit counts once Zotero has synced it.
+    The copy of the source the map was built from starts as the map's own nodes, at
+    the map's library_version, so asking it costs what it always did. The other
+    source's copy is read in full the first time it is asked, and from then on only
+    what has changed. Comparing items rather than versions is also what keeps an edit
+    the map has not seen from being missed: an edit made on zotero.org that the
+    Zotero app had not synced yet when the map was built from it, or an app edit not
+    yet synced when it was built from zotero.org, still differs from the map's node.
+
+    From the local API an edit counts at once, synced or not. From zotero.org, an
+    edit made in the Zotero app counts once Zotero has synced it; one made on
+    zotero.org, on another computer or by the Claude skills counts at once.
     """
 
     INTERVAL = 60
@@ -236,86 +268,130 @@ class Changes:
     def __init__(self):
         self.lock = threading.Lock()
         self.busy = False
-        self.checked = 0
-        self.base = None           # the library_version the result is relative to
-        self.seen = None           # Last-Modified-Version of the last 200
-        self.result = {"state": "pending"}
+        self.copies = {}           # (user_id, source) -> {"version", "items": {key: (fp, title)}}
+        self.results = {}          # source -> (graph mtime, time checked, result)
+        self.latest = None         # the source of the last result handed out
 
-    def snapshot(self, is_open):
+    def snapshot(self, source):
         g = graph()
         s = settings()
-        base = (g or {}).get("library_version")
-        if g is None or base is None:
+        if g is None or g.get("library_version") is None or any(
+                "zfp" not in n for n in g["nodes"]):
             return {"state": "untracked"}
         if s.get("built_for") and s.get("user_id") and s["built_for"] != s["user_id"]:
             return {"state": "untracked"}
+        gid = _graph_cache["mtime"]
         with self.lock:
-            stale = base != self.base or time.time() - self.checked > self.INTERVAL
-            if is_open and stale and not self.busy:
+            r = self.results.get(source)
+            stale = r is None or r[0] != gid or time.time() - r[1] > self.INTERVAL
+            if stale and not self.busy:
                 self.busy = True
-                threading.Thread(target=self._check, args=(base, g), daemon=True).start()
-            r = dict(self.result) if base == self.base else {"state": "pending"}
-        return r
+                threading.Thread(target=self._check, args=(source, g, gid), daemon=True).start()
+            if r and r[0] == gid:
+                self.latest = source
+                return dict(r[2])
+        return {"state": "pending", "source": source}
 
-    def _check(self, base, g):
-        try:
-            result = self._query(base, g)
-        except (ZoteroError, ValueError, KeyError) as e:
-            result = {"state": "error", "error": str(e)}
+    def current(self):
+        """The result last handed out, for the update's time estimate."""
         with self.lock:
-            if result is not None:
-                self.result = result
-            self.base, self.checked, self.busy = base, time.time(), False
+            r = self.results.get(self.latest)
+            return r[2] if r and r[0] == _graph_cache["mtime"] else {}
 
-    def _query(self, base, g):
-        uid = settings().get("user_id") or _read_json(
-            os.path.join(build.CACHE_ZOTERO, "user_id.json"))
-        if not uid:
-            raise ZoteroError("no Zotero user id recorded - link Zotero again")
-        hdr = {"If-Modified-Since-Version": self.seen} if base == self.base and self.seen else None
-        status, h, body = zotero_get(f"users/{uid}/items",
-                                     {"since": base, "format": "versions",
-                                      "itemType": "-attachment"}, hdr)
+    def _check(self, source, g, gid):
+        try:
+            uid = settings().get("user_id") or _read_json(
+                os.path.join(build.CACHE_ZOTERO, "user_id.json"))
+            if not uid:
+                raise ZoteroError("no Zotero user id recorded - link Zotero again")
+            result = self._diff(self._copy(uid, source, g), g, source)
+        except (ZoteroError, ValueError, KeyError) as e:
+            result = {"state": "error", "error": str(e), "source": source}
+        with self.lock:
+            self.results[source] = (gid, time.time(), result)
+            self.busy = False
+
+    def _copy(self, uid, source, g):
+        """This source's copy of the library, brought up to date."""
+        c = self.copies.get((uid, source))
+        version = g["library_version"]
+        if g.get("library_source", "web") == source and (c is None or c["version"] < version):
+            c = {"version": version,
+                 "items": {n["key"]: (n["zfp"], n["title"]) for n in g["nodes"]}}
+        elif c is None:
+            c = {"version": 0, "items": {}}
+        self._advance(uid, source, c)
+        self.copies[(uid, source)] = c
+        return c
+
+    def _advance(self, uid, source, c):
+        local = source == "local"
+        get = zotero_local_get if local else zotero_get
+        where = "Zotero on this computer" if local else "zotero.org"
+        hdr = {"If-Modified-Since-Version": str(c["version"])} if c["version"] else None
+        # Top-level items only: a regular item is never a child, and the child notes
+        # and attachments it would otherwise list are never nodes.
+        params = {"format": "versions", "itemType": "-attachment", "includeTrashed": 1}
+        if local:
+            # The local API has no /deleted, so ask for every key's version, the trash
+            # included: a key missing from the answer was deleted outright.
+            status, h, body = get(f"users/{uid}/items/top", params, hdr)
+        else:
+            status, h, body = get(f"users/{uid}/items/top", dict(params, since=c["version"]), hdr)
         if status == 304:
-            return None
+            return
         if status != 200:
-            raise ZoteroError(f"zotero.org answered {status}")
-        changed = json.loads(body)
-        self.seen = h.get("last-modified-version")
-        nodes = {n["key"]: n for n in g["nodes"]}
-
-        added, edited, removed = [], [], []
+            raise ZoteroError(f"{where} answered {status}")
+        versions = json.loads(body)
+        if local:
+            changed = [k for k, v in versions.items() if v > c["version"]]
+            gone = [k for k in c["items"] if k not in versions]
+        else:
+            changed = list(versions)
+            gone = []
+            if c["version"]:
+                status, _, body = get(f"users/{uid}/deleted", {"since": c["version"]})
+                if status != 200:
+                    raise ZoteroError(f"{where} answered {status}")
+                gone = json.loads(body).get("items", [])
+        items = c["items"]
         keys = sorted(changed)
-        for i in range(0, min(len(keys), 200), 50):
-            status, _, body = zotero_get(f"users/{uid}/items",
-                                         {"itemKey": ",".join(keys[i:i + 50]),
-                                          "format": "json", "limit": 50})
+        for i in range(0, len(keys), 50):
+            # includeTrashed, so that an item moved to the trash comes back marked deleted
+            status, _, body = get(f"users/{uid}/items", {
+                "itemKey": ",".join(keys[i:i + 50]), "format": "json", "limit": 50,
+                "includeTrashed": 1})
             if status != 200:
-                raise ZoteroError(f"zotero.org answered {status}")
+                raise ZoteroError(f"{where} answered {status}")
             for it in json.loads(body):
                 d = it["data"]
-                if d["itemType"] in ("note", "attachment"):
-                    continue
-                row = {"key": d["key"], "title": d.get("title") or "(untitled)"}
-                if d.get("deleted"):
-                    if d["key"] in nodes:
-                        removed.append(row)
+                if d["itemType"] in ("note", "attachment") or d.get("deleted"):
+                    items.pop(d["key"], None)
                 else:
-                    (edited if d["key"] in nodes else added).append(row)
-        # past 200 keys, count without titles rather than make a dozen calls
-        for k in keys[200:]:
-            (edited if k in nodes else added).append({"key": k, "title": None})
+                    items[d["key"]] = (build.item_fingerprint(d), d.get("title") or "(untitled)")
+        for k in gone:
+            items.pop(k, None)
+        c["version"] = int(h.get("last-modified-version") or 0) or max(
+            versions.values(), default=c["version"])
 
-        status, _, body = zotero_get(f"users/{uid}/deleted", {"since": base})
-        if status != 200:
-            raise ZoteroError(f"zotero.org answered {status}")
-        for k in json.loads(body).get("items", []):
-            if k in nodes:
-                removed.append({"key": k, "title": nodes[k]["title"]})
-
+    @staticmethod
+    def _diff(c, g, source):
+        nodes = {n["key"]: n for n in g["nodes"]}
+        items = c["items"]
+        added, edited, removed = [], [], []
+        for k, (fp, title) in items.items():
+            if k not in nodes:
+                added.append({"key": k, "title": title})
+            elif nodes[k]["zfp"] != fp:
+                edited.append({"key": k, "title": title})
+        for k, n in nodes.items():
+            if k not in items:
+                removed.append({"key": k, "title": n["title"]})
+        for rows in (added, edited, removed):
+            rows.sort(key=lambda r: r["title"].lower())
         return {"state": "ok", "added": added, "edited": edited, "removed": removed,
                 "count": len(added) + len(edited) + len(removed),
-                "checked": time.strftime("%H:%M")}
+                "checked": time.strftime("%H:%M"), "source": source}
 
 
 # ---------------------------------------------------------------- the build
@@ -651,8 +727,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send(200, setup_state())
         if path == "/api/status":
             is_open = zotero_open()
+            reading = reading_from(is_open)
             return self._send(200, {"linked": linked(), "zotero_open": is_open,
-                                    "changes": CHANGES.snapshot(is_open),
+                                    "reading": reading, "map": map_info(),
+                                    "changes": CHANGES.snapshot(reading["source"]),
                                     "run": RUNNER.snapshot()})
         if path == "/api/update":
             q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
@@ -676,7 +754,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/api/update":
             if not linked():
                 return self._send(400, {"error": "link Zotero first"})
-            added = len(CHANGES.result.get("added") or [])
+            added = len(CHANGES.current().get("added") or [])
             if not RUNNER.start(expect_new=added):
                 return self._send(409, {"error": "a build is already running"})
             return self._send(200, RUNNER.snapshot())
@@ -708,7 +786,7 @@ PORT_TRIES = 10    # without --port, how far past the default to look for a free
 def already_running(port):
     """True when what answers on this port is MapTheGap itself, not just anything."""
     try:
-        with _LOCAL.open(f"http://127.0.0.1:{port}/api/setup", timeout=1) as r:
+        with build.LOCAL_OPENER.open(f"http://127.0.0.1:{port}/api/setup", timeout=1) as r:
             return r.headers.get("Server", "").startswith(Handler.server_version)
     except (urllib.error.URLError, OSError):
         return False
